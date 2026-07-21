@@ -44,9 +44,22 @@ lein `[com.wotbrew/idx "0.1.3"]` or deps `com.wotbrew/idx {:mvn/version "0.1.3"}
 - Sorted maps and sets cannot be wrapped: the wrapper cannot offer `subseq`/`rseq`/`sorted?`, so rather than silently
   breaking those, `auto`/`index` throw when given one. Wrap a hash-based collection instead (a `:idx/sort` index can often
   replace the sorted collection itself).
+- All values of a property covered by an ordering (`:idx/sort`) index — whether requested with `index` or realised
+  automatically by an `ascending`/`descending` query on an `auto` collection — must be mutually comparable. Modifying the
+  collection with an element whose property value does not compare (say, conj'ing a string where the indexed values are
+  ints) is undefined behaviour: currently it throws, just like `conj` onto a `sorted-set`, but do not rely on the specific
+  outcome. `nil` property values are fine (they sort first).
 - Indexed collections do not support `transient`. This is deliberate: a transient view could not maintain the indexes, and
   handing back the bare backing collection would make functions like `into` (which prefer transients) silently drop your
   indexes. `into` an indexed collection works fine — it takes the `conj` path and keeps indexes fresh.
+- `:idx/unique` does not enforce uniqueness — duplicate indexed values are silently accepted and are undefined behaviour
+  (see the `index` docstring). Keeping the property unique is your responsibility.
+- Quirk: query results over plain (unwrapped) mutable host collections (e.g. Java lists) are lazy where possible and read
+  the live collection, so mutations made before the result is realised will be observed. Realise eagerly (`vec`/`doall`)
+  if you need a snapshot.
+- Quirk: an indexed vector built over a `subvec` rejects negative `assoc` indices with an exception, where plain subvecs
+  silently accept them (a missing bounds check in the host's `SubVector`). The wrapper is deliberately stricter: the host
+  behavior writes outside the subvec window, which would corrupt the indexes.
 
 ## Why 
 
@@ -277,6 +290,9 @@ Some handy functions are enabled due to the presence of indexes.
 Replaces an element in the collection identified by the property/value or predicate.
 
 If no element matches, the collection is returned unchanged.
+
+Unlike the query functions, `replace-by` (like the modification helpers generally) is only defined for vectors, maps and
+sets — the collections idx can wrap. Other collections (lists, lazy seqs, ...) are not supported.
 
 Uses a unique index if one is available (always true if you use [auto](#automatically-index-your-collection-as-it-is-queried))
 

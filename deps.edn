@@ -7,6 +7,14 @@
                 org.clojure/test.check {:mvn/version "0.10.0"}}
    :extra-paths ["bench" "test"]}
 
+  ;; combine with :dev for deps/paths: clojure -M:dev:test-clj
+  :test-clj
+  {:main-opts ["-m" "com.wotbrew.idx-test-runner"]}
+
+  ;; clojure -M:dev:test-cljs — compiles and runs the suite on node
+  :test-cljs
+  {:main-opts ["-m" "cljs.main" "-re" "node" "-m" "com.wotbrew.idx-test-runner"]}
+
   :jar
   {:extra-deps {seancorfield/depstar {:mvn/version "1.0.94"}}
    :main-opts ["-m" "hf.depstar.jar" "idx.jar"]}

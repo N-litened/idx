@@ -17,6 +17,9 @@
 - `lookup`/`lookup-keys` misses now return an empty collection on the indexed path, consistent with the unindexed scan path (previously nil).
 - `index`/`delete-index` now reject unpaired trailing varargs with a descriptive error, like `match`.
 - Docs: `match` docstring described a map argument it does not accept; README `match` example used a regex literal as a value (regex equality is identity, so it could never match); documented that `transient` is unsupported and why.
+- Docs: modifying a collection that has an ordering (`:idx/sort`) index — manually requested or realised by an `ascending`/`descending` query on an `auto` collection — with an element whose property value is not comparable with the indexed values is now documented as undefined behaviour (currently it throws, like conj onto a sorted-set; nil values are fine).
+- Docs: `:idx/unique` documented as not enforcing uniqueness — duplicate indexed values are silently accepted and are undefined behaviour; `replace-by` documented as defined only for vectors/maps/sets; documented the lazy-query-over-mutable-host-collection quirk and the subvec negative-assoc quirk.
+- Added test-runner aliases exiting non-zero on failure: `clojure -M:dev:test-clj` (JVM) and `clojure -M:dev:test-cljs` (ClojureScript on node).
 - Fixed valid values colliding with internal `::not-found` sentinels, which could make vector/map updates no-op, leave stale indexes, or make `replace-by` miss map/set elements.
 - Fixed JVM indexed-vector `assoc` coercing fractional keys and rejecting large integer keys differently from a persistent vector.
 - Map index IDs now retain the actual backing-map key object when an equal, non-identical key is used for an update.

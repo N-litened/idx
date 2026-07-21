@@ -11,6 +11,11 @@
 
   Indexes once realised will be maintained incrementally as you call conj, assoc and so on on the collection.
 
+  Note: an ascending/descending query realises a sort index. Once one exists, all values of
+  that property across the collection must remain mutually comparable — modifying the
+  collection so that stops being true is undefined behaviour (currently it throws, like
+  conj onto a sorted-set). nil property values are fine (they sort first).
+
   The coll must be a vector, map or set. If you pass a seq/seqable/iterable it is converted to a vector.
   Sorted maps/sets are not supported and will throw (the wrapper could not support subseq/rseq/sorted?).
 
@@ -56,6 +61,19 @@
   `:idx/unique` (for identify and replace-by calls)
   `:idx/hash` (for lookup calls)
   `:idx/sort` (for ascending/descending calls)
+
+  All values of a property indexed with `:idx/sort` must be mutually comparable;
+  modifying the collection so that stops being true (e.g. conj'ing an element whose
+  property value is a string where the indexed values are ints) is undefined
+  behaviour (currently it throws, like conj onto a sorted-set). nil property
+  values are fine (they sort first).
+
+  `:idx/unique` does not enforce uniqueness: adding an element whose indexed value
+  duplicates another element's is silently accepted, and is undefined behaviour —
+  the index keeps a single arbitrary (currently last-written) mapping, and a later
+  update or removal of either duplicate can permanently drop the surviving
+  element's entry until the index is rebuilt. Keeping the property unique is the
+  caller's responsibility.
 
   The coll must be a vector, map or set. If you pass a seq/seqable/iterable it is converted to a vector.
   Sorted maps/sets are not supported and will throw (the wrapper could not support subseq/rseq/sorted?).
@@ -247,6 +265,10 @@
 
   If no element matches, the collection is returned unchanged.
 
+  Unlike the query functions, replace-by is only defined for vectors, maps and sets
+  (the collections idx can wrap); calling it on other collections such as lists or
+  lazy seqs is unsupported.
+
   Behaviour is undefined if (p element) does not return a unique value across the collection."
   ([coll pred element] (replace-by coll (p/-prop pred) (p/-predv pred) element))
   ([coll p v element]
@@ -274,6 +296,10 @@
 
   The order is defined by the value of v.
 
+  All values of (p element) across the collection must be mutually comparable.
+  On an auto collection this query realises (and caches) a sort index, subjecting
+  future modifications to the same comparability requirement (see `auto`).
+
   This is much like subseq in clojure.core."
   [coll p test v]
   (let [i (or (p/-get-sort coll p)
@@ -285,6 +311,10 @@
   "Returns a descending order seq of elements where (test (p element) v) returns true.
 
   The order is defined by the value of v.
+
+  All values of (p element) across the collection must be mutually comparable.
+  On an auto collection this query realises (and caches) a sort index, subjecting
+  future modifications to the same comparability requirement (see `auto`).
 
   This is much like rsubseq in clojure.core."
   [coll p test v]
