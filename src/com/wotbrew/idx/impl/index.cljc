@@ -62,8 +62,9 @@
      (fn [eq p i]
        (let [ov (p/-property p old-element)
              v (p/-property p element)]
-         (if (identical? ov v)
-           eq
+         (if (= ov v)
+           ;; the indexed value is unchanged, but the stored element must still be replaced
+           (assoc eq p (assoc i v (assoc (get i v {}) id element)))
            (let [oset (i ov {})
                  oset (dissoc oset id)
                  i (if (empty? oset) (dissoc i ov) (assoc i ov oset))
@@ -78,13 +79,12 @@
 (defn del-eq [eq id old-element]
   (reduce-kv
     (fn [eq p i]
-      (let [ov (p/-property p old-element)]
-        (let [oset (i ov {})
-              oset (dissoc oset id)
-              i (if (empty? oset) (dissoc i ov) (assoc i ov oset))]
-          (if (empty? i)
-            (dissoc eq p)
-            (assoc eq p i)))))
+      (let [ov (p/-property p old-element)
+            oset (i ov {})
+            oset (dissoc oset id)
+            i (if (empty? oset) (dissoc i ov) (assoc i ov oset))]
+        ;; keep the (possibly empty) index so it continues to be maintained
+        (assoc eq p i)))
     eq
     eq))
 
@@ -103,8 +103,8 @@
        (let [ov (p/-property p old-element)
              v (p/-property p element)]
          (cond
-           (and (identical? id (i v)) (identical? ov v)) unq
-           (identical? ov v) (assoc unq p (assoc i v id))
+           (and (= id (i v)) (= ov v)) unq
+           (= ov v) (assoc unq p (assoc i v id))
            :else
            (let [i (dissoc i ov)
                  i (assoc i v id)]
@@ -116,10 +116,8 @@
   (reduce-kv
     (fn [unq p i]
       (let [ov (p/-property p old-element)]
-        (let [i (dissoc i ov)]
-          (if (empty? i)
-            (dissoc unq p)
-            (assoc unq p i)))))
+        ;; keep the (possibly empty) index so it continues to be maintained
+        (assoc unq p (dissoc i ov))))
     unq
     unq))
 
@@ -139,8 +137,9 @@
      (fn [srt p i]
        (let [ov (p/-property p old-element)
              v (p/-property p element)]
-         (if (identical? ov v)
-           srt
+         (if (= ov v)
+           ;; the indexed value is unchanged, but the stored element must still be replaced
+           (assoc srt p (assoc i v (assoc (get i v {}) id element)))
            (let [oset (get i ov {})
                  oset (dissoc oset id)
                  i (if (empty? oset) (dissoc i ov) (assoc i ov oset))
@@ -155,12 +154,23 @@
 (defn del-sorted [srt id old-element]
   (reduce-kv
     (fn [srt p i]
-      (let [ov (p/-property p old-element)]
-        (let [oset (i ov {})
-              oset (dissoc oset id)
-              i (if (empty? oset) (dissoc i ov) (assoc i ov oset))]
-          (if (empty? i)
-            (dissoc srt p)
-            (assoc srt p i)))))
+      (let [ov (p/-property p old-element)
+            oset (i ov {})
+            oset (dissoc oset id)
+            i (if (empty? oset) (dissoc i ov) (assoc i ov oset))]
+        ;; keep the (possibly empty) index so it continues to be maintained
+        (assoc srt p i)))
     srt
     srt))
+
+(defn empty-indexes
+  "Returns the eq/uniq index map with each per-property index emptied,
+  preserving which properties are indexed."
+  [im]
+  (reduce-kv (fn [m p _] (assoc m p {})) {} im))
+
+(defn empty-sorted-indexes
+  "Returns the sorted index map with each per-property index emptied,
+  preserving which properties are indexed."
+  [im]
+  (reduce-kv (fn [m p _] (assoc m p (sorted-map))) {} im))

@@ -151,8 +151,9 @@ Say you have a vector of numbers, and you want to find the negative ones, functi
 
 Uses a one-to-one hash index if available.
 
-`identify` operates on unique properties and predicates. It will throw 
-if the property is non unique. Good for by-id type queries.
+`identify` operates on unique properties and predicates. Behaviour is undefined 
+if the property is not unique across the collection (an arbitrary matching element 
+may be returned). Good for by-id type queries.
 
 ```clojure 
 (def users [{:id 32344, :name "Fred"} ...])
@@ -263,6 +264,7 @@ Some handy functions are enabled due to the presence of indexes.
 #### `replace-by`
 
 Replaces an element in the collection identified by the property/value or predicate.
+If no element matches, the collection is returned unchanged.
 
 Uses a unique index if one is available (always true if you use [auto](#automatically-index-your-collection-as-it-is-queried))
 

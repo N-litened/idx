@@ -141,7 +141,13 @@
   (-lookup [coll k] (-lookup m k))
   (-lookup [coll k not-found] (-lookup m k not-found))
   IEmptyableCollection
-  (-empty [coll] (IndexedPersistentMap. (-empty m) nil nil nil auto))
+  (-empty [coll]
+    (IndexedPersistentMap.
+      (-empty m)
+      (some-> eq i/empty-indexes)
+      (some-> uniq i/empty-indexes)
+      (some-> sorted i/empty-sorted-indexes)
+      auto))
   ICollection
   (-conj [coll entry]
     (if (vector? entry)

@@ -96,7 +96,7 @@
 
   IWithMeta
   (-with-meta [coll new-meta]
-    (if (identical? new-meta meta)
+    (if (identical? new-meta (meta s))
       coll
       (IndexedPersistentSet. (with-meta s new-meta) eq uniq sorted auto)))
 
@@ -116,7 +116,13 @@
           auto))))
 
   IEmptyableCollection
-  (-empty [coll] (IndexedPersistentSet. (-empty s) nil nil nil auto))
+  (-empty [coll]
+    (IndexedPersistentSet.
+      (-empty s)
+      (some-> eq i/empty-indexes)
+      (some-> uniq i/empty-indexes)
+      (some-> sorted i/empty-sorted-indexes)
+      auto))
 
   IEquiv
   (-equiv [coll other] (-equiv s other))

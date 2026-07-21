@@ -119,7 +119,13 @@
           (some-> uniq (i/add-uniq o o))
           (some-> sorted (i/add-sorted o o))
           auto))))
-  (empty [this] (IndexedPersistentSet. (.empty ^IPersistentSet s) nil nil nil auto))
+  (empty [this]
+    (IndexedPersistentSet.
+      (.empty ^IPersistentSet s)
+      (some-> eq i/empty-indexes)
+      (some-> uniq i/empty-indexes)
+      (some-> sorted i/empty-sorted-indexes)
+      auto))
   (equiv [this o] (.equiv ^IPersistentSet s o))
   Object
   (hashCode [this] (.hashCode s))

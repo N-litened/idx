@@ -24,6 +24,11 @@
   [coll]
   (p/-unwrap coll))
 
+(defn- as-property
+  "Predicates (such as those returned by match/pred) are indexed on their underlying property."
+  [p]
+  (if (satisfies? p/Predicate p) (p/-prop p) p))
+
 (defn index
   "Adds indexes to the collection, returning a new indexed collection.
 
@@ -39,22 +44,22 @@
 
   If the collection is already indexed, it is returned as-is without modification."
   ([coll] coll)
-  ([coll p kind] (p/-add-index coll p kind))
+  ([coll p kind] (p/-add-index coll (as-property p) kind))
   ([coll p kind & more]
-   (loop [coll (p/-add-index coll p kind)
+   (loop [coll (p/-add-index coll (as-property p) kind)
           more more]
      (if-some [[p kind & more] (seq more)]
-       (recur (p/-add-index coll p kind) more)
+       (recur (p/-add-index coll (as-property p) kind) more)
        coll))))
 
 (defn delete-index
   "Deletes indexes from the collection, returning a new collection."
-  ([coll p kind] (p/-del-index coll p kind))
+  ([coll p kind] (p/-del-index coll (as-property p) kind))
   ([coll p kind & more]
-   (loop [coll (p/-del-index coll p kind)
+   (loop [coll (p/-del-index coll (as-property p) kind)
           more more]
      (if-some [[p kind & more] (seq more)]
-       (recur (p/-del-index coll p kind) more)
+       (recur (p/-del-index coll (as-property p) kind) more)
        coll))))
 
 (defrecord Comp [p1 p2]
@@ -112,7 +117,11 @@
             (if-some [[prop val & tail] (seq more)]
               (recur (build-match-map m prop val) tail)
               m))]
-    (->Pred (->Select (set (keys m))) m)))
+    (if (= 1 (count m))
+      ;; a single-property match shares its index with the plain property
+      (let [[p v] (first m)]
+        (->Pred p v))
+      (->Pred (->Select (set (keys m))) m))))
 
 (defrecord AsKey [k]
   p/Property
@@ -165,7 +174,7 @@
   ([coll pred] (lookup-keys coll (p/-prop pred) (p/-predv pred)))
   ([coll p v]
    (if (instance? Pred v)
-     (lookup-keys coll (pcomp (p/-prop v) p) (p/-predv p))
+     (lookup-keys coll (pcomp (p/-prop v) p) (p/-predv v))
      (if-some [i (p/-get-eq coll p)]
        (let [m (i v {})] (keys m))
        (map first (filter (fn [[_ element]] (= v (p/-property p element))) (p/-id-element-pairs coll)))))))
@@ -179,9 +188,9 @@
    (if (instance? Pred v)
      (identify coll (pcomp (p/-prop v) p) (p/-predv v))
      (if-some [i (p/-get-uniq coll p)]
-       (if-some [id (i v)]
-         (coll id)
-         (get coll nil))
+       ;; find (rather than get) so ids that are themselves nil (e.g. nil map keys) still resolve
+       (when-some [kv (find i v)]
+         (coll (val kv)))
        (reduce (fn [_ element] (when (= v (p/-property p element)) (reduced element))) nil (p/-elements coll))))))
 
 (defn pk
@@ -189,7 +198,7 @@
   ([coll pred] (pk coll (p/-prop pred) (p/-predv pred)))
   ([coll p v]
    (if (instance? Pred v)
-     (identify coll (pcomp (p/-prop v) p) (p/-predv v))
+     (pk coll (pcomp (p/-prop v) p) (p/-predv v))
      (if-some [i (p/-get-uniq coll p)]
        (i v)
        (reduce (fn [_ [id element]] (when (= v (p/-property p element)) (reduced id))) nil (p/-id-element-pairs coll))))))
@@ -202,20 +211,27 @@
 
   Would return a new collection where the element identified by :id = 42 has been replaced by the value 'new-customer'.
 
+  If no element matches, the collection is returned unchanged.
+
   Behaviour is undefined if (p element) does not return a unique value across the collection."
   ([coll pred element] (replace-by coll (p/-prop pred) (p/-predv pred) element))
   ([coll p v element]
    (if (instance? Pred v)
      (replace-by coll (pcomp (p/-prop v) p) (p/-predv v) element)
-     (if-some [i (p/-get-uniq coll p)]
-       (let [id (get i v)]
-         (if (associative? coll)
-           (assoc coll id element)
-           (-> coll (disj id) (conj element))))
-       (let [id (reduce (fn [_ [id element]] (when (= v (p/-property p element)) (reduced id))) nil (p/-id-element-pairs coll))]
-         (if (associative? coll)
-           (assoc coll id element)
-           (-> coll (disj id) (conj element))))))))
+     (let [replace1 (fn [id]
+                      (if (associative? coll)
+                        (assoc coll id element)
+                        (-> coll (disj id) (conj element))))]
+       (if-some [i (p/-get-uniq coll p)]
+         (if-some [kv (find i v)]
+           (replace1 (val kv))
+           coll)
+         (let [id (reduce (fn [acc [id element]] (if (= v (p/-property p element)) (reduced id) acc))
+                          ::not-found
+                          (p/-id-element-pairs coll))]
+           (if (= ::not-found id)
+             coll
+             (replace1 id))))))))
 
 (defn ascending
   "Returns an ascending order seq of elements where (test (p element) v) returns true.
@@ -224,12 +240,10 @@
 
   This is much like subseq in clojure.core."
   [coll p test v]
-  (let [i (p/-get-sort coll p)
-        i (or i (i/create-sorted-from-elements (p/-elements coll) p))]
-    (if (some? i)
-      (->> (subseq i test v)
-           (mapcat (fn [e] (vals (val e)))))
-      ())))
+  (let [i (or (p/-get-sort coll p)
+              (i/create-sorted-from-elements coll p))]
+    (->> (subseq i test v)
+         (mapcat (fn [e] (vals (val e)))))))
 
 (defn descending
   "Returns a descending order seq of elements where (test (p element) v) returns true.
@@ -238,9 +252,7 @@
 
   This is much like rsubseq in clojure.core."
   [coll p test v]
-  (let [i (p/-get-sort coll p)
-        i (or i (i/create-sorted-from-elements (p/-elements coll) p))]
-    (if (some? i)
-      (->> (rsubseq i test v)
-           (mapcat (fn [e] (vals (val e)))))
-      ())))
+  (let [i (or (p/-get-sort coll p)
+              (i/create-sorted-from-elements coll p))]
+    (->> (rsubseq i test v)
+         (mapcat (fn [e] (vals (val e)))))))

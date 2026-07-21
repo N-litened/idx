@@ -112,7 +112,12 @@
         auto)))
   IEmptyableCollection
   (-empty [coll]
-    (IndexedPersistentVector. (-empty v) nil nil nil auto))
+    (IndexedPersistentVector.
+      (-empty v)
+      (some-> eq i/empty-indexes)
+      (some-> uniq i/empty-indexes)
+      (some-> sorted i/empty-sorted-indexes)
+      auto))
   ISequential
   IEquiv
   (-equiv [coll other] (-equiv v other))

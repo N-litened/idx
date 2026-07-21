@@ -31,7 +31,7 @@
   function
   (-property [this element] (this element))
   nil
-  (-property [this element] nil)
+  (-property [this element] (get element nil))
   Fn
   (-property [this element] (this element))
   Keyword

@@ -90,7 +90,7 @@
   (clear [this] (throw (UnsupportedOperationException.)))
   (get [this i] (.get ^List v i))
   (indexOf [this o] (.indexOf ^List v o))
-  (lastIndexOf [this o] (.indexOf ^List v o))
+  (lastIndexOf [this o] (.lastIndexOf ^List v o))
   (listIterator [this] (.listIterator ^List v))
   (listIterator [this i] (.listIterator ^List v i))
   (subList [this from to] (.subList ^List v from to ))
@@ -142,7 +142,13 @@
   (nth [this i notFound] (.nth ^Indexed v i notFound))
   IPersistentCollection
   (count [this] (.count ^IPersistentCollection v))
-  (empty [this] (IndexedPersistentVector. (.empty ^IPersistentCollection v) nil nil nil auto))
+  (empty [this]
+    (IndexedPersistentVector.
+      (.empty ^IPersistentCollection v)
+      (some-> eq i/empty-indexes)
+      (some-> uniq i/empty-indexes)
+      (some-> sorted i/empty-sorted-indexes)
+      auto))
   (equiv [this o] (.equiv ^IPersistentCollection v o))
   IPersistentStack
   (peek [this] (.peek ^IPersistentStack v))
@@ -167,7 +173,6 @@
   (equals [this obj] (.equals v obj))
   (toString [this] (.toString v))
   Sequential
-  RandomAccess
   IFn
   (invoke [this arg1] (.invoke ^IFn v arg1))
   (invoke [this arg1 arg2] (.invoke ^IFn v arg1 arg2))
@@ -179,6 +184,4 @@
   IReduceInit
   (reduce [this f init] (reduce f init v))
   IKVReduce
-  (kvreduce [this f init] (reduce-kv f init v))
-  Comparable
-  (compareTo [x y] (.compareTo ^Comparable v y)))
+  (kvreduce [this f init] (reduce-kv f init v)))
