@@ -342,6 +342,11 @@ There are a couple of useful property combinators [match](#match) and [pcomp](#p
 Several functions take predicates as arguments, a predicate composes a property with its expected value. This is how `match` works.
 
 You can lift any function into a truthy/falsy test with [pred](#pred).
+
+A predicate is also accepted anywhere a *property* is expected — the property/value query forms
+(`(lookup coll (pred :a) true)`), `match` keys, and `ascending`/`descending`. There it is normalised to its underlying
+composed property and its own expected value is ignored (you supply one). This matches how `index` treats its property
+argument, so the same form addresses the same index in every position.
  
 #### Mutability 
 

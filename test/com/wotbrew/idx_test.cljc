@@ -468,6 +468,29 @@
     (is (= [1 2 3] (sort (auto [3 1 2]))))
     #?(:clj (is (= [2 3] (subvec v 1))))))
 
+(deftest predicate-in-property-position-test
+  ;; a match/pred form used where a property is expected is normalised to its
+  ;; underlying property (its own expected value is ignored; the supplied v is
+  ;; used) — same normalisation index applies, so the same form hits the index
+  (let [coll [{:a 1} {:a nil}]
+        c (index coll (pred :a) :idx/hash (pred :a) :idx/unique)]
+    (is (= [{:a 1}] (vec (lookup c (pred :a) true))))
+    (is (= [{:a nil}] (vec (lookup c (pred :a) false))))
+    (is (= [{:a 1}] (vec (lookup coll (pred :a) true)))) ; unindexed scan agrees
+    (is (= [{:a 1}] (vec (lookup c (match (pred :a) true)))))
+    (is (= [0] (vec (lookup-keys c (pred :a) true))))
+    (is (= {:a 1} (identify c (pred :a) true)))
+    (is (= 0 (pk c (pred :a) true)))
+    (is (= [{:a 2} {:a nil}] (vec (replace-by c (pred :a) true {:a 2}))))
+    (is (= [{:a nil} {:a 1}] (vec (ascending c (pred :a) >= false))))
+    (is (= [{:a 1} {:a nil}] (vec (descending c (pred :a) <= true)))))
+  ;; a composite match with :idx/value placeholders also works in the 3-ary
+  ;; property position, with the composite key map as v
+  (let [c2 (index [{:foo 1 :bar 2} {:foo 1 :bar 3}]
+                  (match :foo :idx/value :bar :idx/value) :idx/hash)]
+    (is (= [{:foo 1 :bar 2}]
+           (vec (lookup c2 (match :foo :idx/value :bar :idx/value) {:foo 1 :bar 2}))))))
+
 #?(:cljs
    (deftest fractional-assoc-key-test
      ;; host cljs vectors truncate fractional keys to an integer slot; the

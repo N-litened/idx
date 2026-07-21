@@ -132,9 +132,12 @@
 
 (defn- build-match-map
   [m p v]
-  (if (predicate? v)
-    (build-match-map m (pcomp (p/-prop v) p) (p/-predv v))
-    (assoc m p v)))
+  ;; keys are normalised like index/query property positions, so a (pred ...)
+  ;; used as a match key composes instead of silently matching nothing
+  (let [p (as-property p)]
+    (if (predicate? v)
+      (build-match-map m (pcomp (p/-prop v) p) (p/-predv v))
+      (assoc m p v))))
 
 (defn match
   "Takes interleaved property/value-or-predicate pairs and returns a predicate.
@@ -145,6 +148,10 @@
 
   If each property value-or-predicate pair matches, the element
   is returned.
+
+  Properties (the keys) may themselves be `(match)`/`(pred)` forms; they are
+  normalised to their underlying property, like the property arguments of
+  `index` and the query functions.
 
   This allows you to use composite indexes.
 
@@ -204,28 +211,36 @@
 
   The returned sequence should be considered unsorted.
 
-  The 2-ary takes a 'predicate' which composes a property with its expected value, either a `(match)` form, or a `(pred)` form."
+  The 2-ary takes a 'predicate' which composes a property with its expected value, either a `(match)` form, or a `(pred)` form.
+
+  In the 3-ary form p may itself be a `(match)`/`(pred)` form: it is normalised to its
+  underlying property (its own expected value is ignored — v is used). This mirrors how
+  `index` treats its property argument, so the same form addresses the same index. The
+  same normalisation applies in lookup-keys/identify/pk/replace-by/ascending/descending
+  and in `match` key positions."
   ([coll pred] (lookup coll (p/-prop pred) (p/-predv pred)))
   ([coll p v]
-   (if (predicate? v)
-     (lookup coll (pcomp (p/-prop v) p) (p/-predv v))
-     (if-some [i (p/-get-eq coll p)]
-       ;; (vals {}) is nil; return [] so a miss looks the same whether or not
-       ;; the property happens to be indexed (the scan path returns a filterv)
-       (let [m (i v {})] (or (vals m) []))
-       (filterv (fn [element] (= v (p/-property p element))) (p/-elements coll))))))
+   (let [p (as-property p)]
+     (if (predicate? v)
+       (lookup coll (pcomp (p/-prop v) p) (p/-predv v))
+       (if-some [i (p/-get-eq coll p)]
+         ;; (vals {}) is nil; return [] so a miss looks the same whether or not
+         ;; the property happens to be indexed (the scan path returns a filterv)
+         (let [m (i v {})] (or (vals m) []))
+         (filterv (fn [element] (= v (p/-property p element))) (p/-elements coll)))))))
 
 (defn lookup-keys
   "Like lookup, but returns the indexes or keys of the matching elements."
   ([coll pred] (lookup-keys coll (p/-prop pred) (p/-predv pred)))
   ([coll p v]
-   (if (predicate? v)
-     (lookup-keys coll (pcomp (p/-prop v) p) (p/-predv v))
-     (if-some [i (p/-get-eq coll p)]
-       ;; (keys {}) is nil; return () so a miss looks the same whether or not
-       ;; the property happens to be indexed (the scan path returns a seq)
-       (let [m (i v {})] (or (keys m) ()))
-       (map first (filter (fn [[_ element]] (= v (p/-property p element))) (p/-id-element-pairs coll)))))))
+   (let [p (as-property p)]
+     (if (predicate? v)
+       (lookup-keys coll (pcomp (p/-prop v) p) (p/-predv v))
+       (if-some [i (p/-get-eq coll p)]
+         ;; (keys {}) is nil; return () so a miss looks the same whether or not
+         ;; the property happens to be indexed (the scan path returns a seq)
+         (let [m (i v {})] (or (keys m) ()))
+         (map first (filter (fn [[_ element]] (= v (p/-property p element))) (p/-id-element-pairs coll))))))))
 
 (defn identify
   "Returns the element where the property equals v.
@@ -233,13 +248,14 @@
   Behaviour is undefined if (p element) does not return a unique value across the collection."
   ([coll pred] (identify coll (p/-prop pred) (p/-predv pred)))
   ([coll p v]
-   (if (predicate? v)
-     (identify coll (pcomp (p/-prop v) p) (p/-predv v))
-     (if-some [i (p/-get-uniq coll p)]
-       ;; find (rather than get) so ids that are themselves nil (e.g. nil map keys) still resolve
-       (when-some [kv (find i v)]
-         (coll (val kv)))
-       (reduce (fn [_ element] (when (= v (p/-property p element)) (reduced element))) nil (p/-elements coll))))))
+   (let [p (as-property p)]
+     (if (predicate? v)
+       (identify coll (pcomp (p/-prop v) p) (p/-predv v))
+       (if-some [i (p/-get-uniq coll p)]
+         ;; find (rather than get) so ids that are themselves nil (e.g. nil map keys) still resolve
+         (when-some [kv (find i v)]
+           (coll (val kv)))
+         (reduce (fn [_ element] (when (= v (p/-property p element)) (reduced element))) nil (p/-elements coll)))))))
 
 (defn pk
   "Returns the key (index/map key) given a unique property/value pair or predicate.
@@ -249,11 +265,12 @@
   to distinguish those cases."
   ([coll pred] (pk coll (p/-prop pred) (p/-predv pred)))
   ([coll p v]
-   (if (predicate? v)
-     (pk coll (pcomp (p/-prop v) p) (p/-predv v))
-     (if-some [i (p/-get-uniq coll p)]
-       (i v)
-       (reduce (fn [_ [id element]] (when (= v (p/-property p element)) (reduced id))) nil (p/-id-element-pairs coll))))))
+   (let [p (as-property p)]
+     (if (predicate? v)
+       (pk coll (pcomp (p/-prop v) p) (p/-predv v))
+       (if-some [i (p/-get-uniq coll p)]
+         (i v)
+         (reduce (fn [_ [id element]] (when (= v (p/-property p element)) (reduced id))) nil (p/-id-element-pairs coll)))))))
 
 (defn replace-by
   "Replaces an element selected by an alternative key.
@@ -272,24 +289,25 @@
   Behaviour is undefined if (p element) does not return a unique value across the collection."
   ([coll pred element] (replace-by coll (p/-prop pred) (p/-predv pred) element))
   ([coll p v element]
-   (if (predicate? v)
-     (replace-by coll (pcomp (p/-prop v) p) (p/-predv v) element)
-     (let [replace1 (fn [id]
-                      (if (associative? coll)
-                        (assoc coll id element)
-                        (-> coll (disj id) (conj element))))]
-       (if-some [i (p/-get-uniq coll p)]
-         (if-some [kv (find i v)]
-           (replace1 (val kv))
-           coll)
-         (let [[found? id]
-               (reduce (fn [acc [id element]]
-                         (if (= v (p/-property p element))
-                           (reduced [true id])
-                           acc))
-                       [false nil]
-                       (p/-id-element-pairs coll))]
-           (if found? (replace1 id) coll)))))))
+   (let [p (as-property p)]
+     (if (predicate? v)
+       (replace-by coll (pcomp (p/-prop v) p) (p/-predv v) element)
+       (let [replace1 (fn [id]
+                        (if (associative? coll)
+                          (assoc coll id element)
+                          (-> coll (disj id) (conj element))))]
+         (if-some [i (p/-get-uniq coll p)]
+           (if-some [kv (find i v)]
+             (replace1 (val kv))
+             coll)
+           (let [[found? id]
+                 (reduce (fn [acc [id element]]
+                           (if (= v (p/-property p element))
+                             (reduced [true id])
+                             acc))
+                         [false nil]
+                         (p/-id-element-pairs coll))]
+             (if found? (replace1 id) coll))))))))
 
 (defn ascending
   "Returns an ascending order seq of elements where (test (p element) v) returns true.
@@ -302,7 +320,8 @@
 
   This is much like subseq in clojure.core."
   [coll p test v]
-  (let [i (or (p/-get-sort coll p)
+  (let [p (as-property p)
+        i (or (p/-get-sort coll p)
               (i/create-sorted-from-elements coll p))]
     (->> (subseq i test v)
          (mapcat (fn [e] (vals (val e)))))))
@@ -318,7 +337,8 @@
 
   This is much like rsubseq in clojure.core."
   [coll p test v]
-  (let [i (or (p/-get-sort coll p)
+  (let [p (as-property p)
+        i (or (p/-get-sort coll p)
               (i/create-sorted-from-elements coll p))]
     (->> (rsubseq i test v)
          (mapcat (fn [e] (vals (val e)))))))
