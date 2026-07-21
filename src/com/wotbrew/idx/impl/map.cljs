@@ -102,34 +102,35 @@
   IAssociative
   (-contains-key? [coll k] (-contains-key? m k))
   (-assoc [coll k element]
-    (let [old-element (-lookup m k ::not-found)]
-      (cond
-        (identical? element old-element) coll
-        (= ::not-found old-element)
-        (IndexedPersistentMap.
-          (-assoc m k element)
-          (some-> eq (i/add-eq k element))
-          (some-> uniq (i/add-uniq k element))
-          (some-> sorted (i/add-sorted k element))
-          auto)
-        :else
-        (IndexedPersistentMap.
-          (-assoc m k element)
-          (some-> eq (i/add-eq k old-element element))
-          (some-> uniq (i/add-uniq k old-element element))
-          (some-> sorted (i/add-sorted k old-element element))
-          auto))))
+    (if-some [entry (find m k)]
+      (let [id (key entry)
+            old-element (val entry)]
+        (if (identical? element old-element)
+          coll
+          (IndexedPersistentMap.
+            (-assoc m k element)
+            (some-> eq (i/add-eq id old-element element))
+            (some-> uniq (i/add-uniq id old-element element))
+            (some-> sorted (i/add-sorted id old-element element))
+            auto)))
+      (IndexedPersistentMap.
+        (-assoc m k element)
+        (some-> eq (i/add-eq k element))
+        (some-> uniq (i/add-uniq k element))
+        (some-> sorted (i/add-sorted k element))
+        auto)))
   IMap
   (-dissoc [coll k]
-    (let [old-element (-lookup m k ::not-found)]
-      (if (= ::not-found old-element)
-        coll
+    (if-some [entry (find m k)]
+      (let [id (key entry)
+            old-element (val entry)]
         (IndexedPersistentMap.
           (-dissoc m k)
-          (some-> eq (i/del-eq k old-element))
+          (some-> eq (i/del-eq id old-element))
           (some-> uniq (i/del-uniq old-element))
-          (some-> sorted (i/del-sorted k old-element))
-          auto))))
+          (some-> sorted (i/del-sorted id old-element))
+          auto))
+      coll))
   IFind
   (-find [coll k] (-find m k))
   ISeqable

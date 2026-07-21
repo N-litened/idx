@@ -15,7 +15,8 @@
 
   Metadata is carried over to the new structure.
 
-  If the collection is already indexed, it is returned as-is without modification."
+  If the collection is already automatically indexed, it is returned as-is. If it
+  has only manual indexes, those indexes are retained and automatic indexing is enabled."
   [coll]
   (p/-wrap coll true))
 
@@ -35,14 +36,14 @@
   Specify a property/predicate to index, and a `kind` being:
 
   `:idx/unique` (for identify and replace-by calls)
-  `:idx/hash (for lookup calls)`
+  `:idx/hash` (for lookup calls)
   `:idx/sort` (for ascending/descending calls)
 
   The coll must be a vector, map or set. If you pass a seq/seqable/iterable it is converted to a vector.
 
   Metadata is carried over to the new structure.
 
-  If the collection is already indexed, it is returned as-is without modification."
+  Existing indexes are retained."
   ([coll] coll)
   ([coll p kind] (p/-add-index coll (as-property p) kind))
   ([coll p kind & more]
@@ -82,15 +83,15 @@
   (-predv [this] v))
 
 (defn pred
-  "Can be used in matches to nest truthy/falsey predicates.
+  "Can be used in matches to nest truthy/falsy predicates.
 
-  When you want to test truthyness (pred p) or (pred p true), if you want to test falseyness (pred p false)."
+  Use (pred p) or (pred p true) to test truthiness, and (pred p false) to test falsiness."
   ([p] (->Pred (pcomp boolean p) true))
   ([p v] (->Pred (pcomp boolean p) v)))
 
 (defn- build-match-map
   [m p v]
-  (if (instance? Pred v)
+  (if (satisfies? p/Predicate v)
     (build-match-map m (pcomp (p/-prop v) p) (p/-predv v))
     (assoc m p v)))
 
@@ -110,8 +111,10 @@
 
   e.g
 
-  (idx coll (match :foo :idx/value, :bar :idx/value))"
+  (index coll (match :foo :idx/value, :bar :idx/value) :idx/hash)"
   [p v & more]
+  (when (odd? (count more))
+    (throw (ex-info "match requires property/value pairs" {:unpaired-property (last more)})))
   (let [m (loop [m (build-match-map {} p v)
                  more more]
             (if-some [[prop val & tail] (seq more)]
@@ -163,17 +166,17 @@
   The 2-ary takes a 'predicate' which composes a property with its expected value, either a `(match)` form, or a `(pred)` form."
   ([coll pred] (lookup coll (p/-prop pred) (p/-predv pred)))
   ([coll p v]
-   (if (instance? Pred v)
+   (if (satisfies? p/Predicate v)
      (lookup coll (pcomp (p/-prop v) p) (p/-predv v))
      (if-some [i (p/-get-eq coll p)]
        (let [m (i v {})] (vals m))
        (filterv (fn [element] (= v (p/-property p element))) (p/-elements coll))))))
 
 (defn lookup-keys
-  "Like lookup but returns you the index or key of the elements rather than the elements themselves"
+  "Like lookup, but returns the indexes or keys of the matching elements."
   ([coll pred] (lookup-keys coll (p/-prop pred) (p/-predv pred)))
   ([coll p v]
-   (if (instance? Pred v)
+   (if (satisfies? p/Predicate v)
      (lookup-keys coll (pcomp (p/-prop v) p) (p/-predv v))
      (if-some [i (p/-get-eq coll p)]
        (let [m (i v {})] (keys m))
@@ -185,7 +188,7 @@
   Behaviour is undefined if (p element) does not return a unique value across the collection."
   ([coll pred] (identify coll (p/-prop pred) (p/-predv pred)))
   ([coll p v]
-   (if (instance? Pred v)
+   (if (satisfies? p/Predicate v)
      (identify coll (pcomp (p/-prop v) p) (p/-predv v))
      (if-some [i (p/-get-uniq coll p)]
        ;; find (rather than get) so ids that are themselves nil (e.g. nil map keys) still resolve
@@ -197,14 +200,14 @@
   "Returns the key (index/map key) given a unique property/value pair or predicate."
   ([coll pred] (pk coll (p/-prop pred) (p/-predv pred)))
   ([coll p v]
-   (if (instance? Pred v)
+   (if (satisfies? p/Predicate v)
      (pk coll (pcomp (p/-prop v) p) (p/-predv v))
      (if-some [i (p/-get-uniq coll p)]
        (i v)
        (reduce (fn [_ [id element]] (when (= v (p/-property p element)) (reduced id))) nil (p/-id-element-pairs coll))))))
 
 (defn replace-by
-  "Replaces an element by an alternative key.
+  "Replaces an element selected by an alternative key.
 
   e.g
   (replace-by customers :id 42 new-customer)
@@ -216,7 +219,7 @@
   Behaviour is undefined if (p element) does not return a unique value across the collection."
   ([coll pred element] (replace-by coll (p/-prop pred) (p/-predv pred) element))
   ([coll p v element]
-   (if (instance? Pred v)
+   (if (satisfies? p/Predicate v)
      (replace-by coll (pcomp (p/-prop v) p) (p/-predv v) element)
      (let [replace1 (fn [id]
                       (if (associative? coll)
@@ -226,12 +229,14 @@
          (if-some [kv (find i v)]
            (replace1 (val kv))
            coll)
-         (let [id (reduce (fn [acc [id element]] (if (= v (p/-property p element)) (reduced id) acc))
-                          ::not-found
-                          (p/-id-element-pairs coll))]
-           (if (= ::not-found id)
-             coll
-             (replace1 id))))))))
+         (let [[found? id]
+               (reduce (fn [acc [id element]]
+                         (if (= v (p/-property p element))
+                           (reduced [true id])
+                           acc))
+                       [false nil]
+                       (p/-id-element-pairs coll))]
+           (if found? (replace1 id) coll)))))))
 
 (defn ascending
   "Returns an ascending order seq of elements where (test (p element) v) returns true.

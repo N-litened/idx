@@ -94,7 +94,25 @@
     (is (= {:foo 42,:bar 43, :baz 45} (identify v (match :foo (pred even?) :bar 43))))
     (is (= {:foo 42,:bar 43, :baz 45} (identify v (match :foo (match number? true odd? false) :bar 43))))
     (is (= {:foo 42, :bar 43 :baz 45} (identify v (match :foo 42, :baz 45, :bar 43))))
-    (is (nil? (identify v (match :foo 100))))))
+    (is (nil? (identify v (match :foo 100)))))
+  (is (thrown? #?(:clj clojure.lang.ExceptionInfo :cljs js/Error)
+               (match :foo 1 :bar))))
+
+(deftest predicate-protocol-implementation-test
+  (let [positive-value? (reify p/Predicate
+                          (-prop [_] pos?)
+                          (-predv [_] true))
+        positive-element? (reify p/Predicate
+                            (-prop [_] (pcomp pos? :n))
+                            (-predv [_] true))
+        coll [{:n -1} {:n 2}]
+        indexed (index coll positive-element? :idx/hash positive-element? :idx/unique)]
+    (is (= [{:n 2}] (lookup coll :n positive-value?)))
+    (is (= [{:n 2}] (lookup indexed positive-element?)))
+    (is (= [1] (vec (lookup-keys indexed :n positive-value?))))
+    (is (= {:n 2} (identify indexed :n positive-value?)))
+    (is (= 1 (pk indexed :n positive-value?)))
+    (is (= [{:n -1} {:n 3}] (replace-by indexed :n positive-value? {:n 3})))))
 
 (deftest as-key-test
   (is (= {even? 4} (identify [{even? 4} {even? 5}] (as-key even?) 4)))
@@ -221,6 +239,61 @@
     (is (= [{:id 1 :name "a"}] (vec (lookup v :id 1)))) ; realise the auto index
     (let [v2 (assoc v 0 {:id 1 :name "b"})]
       (is (= [{:id 1 :name "b"}] (vec (lookup v2 :id 1)))))))
+
+(deftest internal-sentinel-values-test
+  ;; Namespaced keywords used internally as old not-found markers are valid user data.
+  (let [sentinel :com.wotbrew.idx.impl.vector/not-found
+        appended (assoc (index [] identity :idx/hash) 0 sentinel)
+        replaced (assoc (index [sentinel] identity :idx/hash identity :idx/sort) 0 :replacement)]
+    (is (= [sentinel] appended))
+    (is (= [sentinel] (vec (lookup appended identity sentinel))))
+    (is (= [:replacement] replaced))
+    (is (empty? (lookup replaced identity sentinel)))
+    (is (= [:replacement] (vec (lookup replaced identity :replacement))))
+    (is (= [:replacement] (vec (ascending replaced identity >= :replacement)))))
+  (let [sentinel :com.wotbrew.idx.impl.map/not-found
+        added (assoc (index {} identity :idx/hash) :k sentinel)
+        indexed (index {:k sentinel} identity :idx/hash identity :idx/sort)
+        replaced (assoc indexed :k :replacement)
+        removed (dissoc indexed :k)]
+    (is (= {:k sentinel} added))
+    (is (= [sentinel] (vec (lookup added identity sentinel))))
+    (is (= {:k :replacement} replaced))
+    (is (empty? (lookup replaced identity sentinel)))
+    (is (= [:replacement] (vec (lookup replaced identity :replacement))))
+    (is (= {} removed))
+    (is (empty? (lookup removed identity sentinel)))))
+
+(deftest replace-by-sentinel-id-test
+  (let [sentinel :com.wotbrew.idx/not-found]
+    (doseq [m [{sentinel {:id 1}}
+               (index {sentinel {:id 1}} :other :idx/hash)]]
+      (is (= {sentinel {:id 2}} (replace-by m :id 1 {:id 2}))))
+    (doseq [s [#{sentinel} (index #{sentinel} hash :idx/hash)]]
+      (is (= #{:replacement} (replace-by s identity sentinel :replacement))))))
+
+#?(:clj
+   (deftest jvm-collection-interop-parity-test
+     ;; PersistentVector accepts integer types using Number.intValue, but rejects
+     ;; floating-point keys even when their value is mathematically integral.
+     (is (thrown? IllegalArgumentException (assoc (auto [0 1]) 1.0 :replacement)))
+     (is (= (assoc [0 1] 4294967297 :replacement)
+            (assoc (auto [0 1]) 4294967297 :replacement)))
+     ;; Clojure maps retain the existing key object when assoc receives an equal key.
+     (let [k1 (String. "key")
+           k2 (String. "key")
+           m (assoc (index {k1 {:id 1}} :id :idx/unique) k2 {:id 2})]
+       (is (identical? k1 (pk m :id 2))))
+     (let [m (auto {:a 1})]
+       (is (thrown? RuntimeException (.assocEx ^clojure.lang.IPersistentMap m :a 2))))))
+
+(deftest plain-sequential-query-test
+  (let [coll (list {:id 2} {:id 1})]
+    (is (identical? coll (p/-elements coll)))
+    (is (= [{:id 1}] (lookup coll :id 1)))
+    (is (= [0] (vec (lookup-keys coll :id 2))))
+    (is (= {:id 1} (identify coll :id 1)))
+    (is (= [{:id 1} {:id 2}] (vec (ascending coll :id >= 0))))))
 
 (deftest index-survives-emptying-test
   ;; a manually specified index must keep being maintained after the

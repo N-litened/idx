@@ -45,15 +45,15 @@ lein `[com.wotbrew/idx "0.1.3"]` or deps `com.wotbrew/idx {:mvn/version "0.1.3"}
 ## Why 
 
 It is common to have the problem of taking repeated linear lookups (as you might accomplish with `filter`) to a sub-linear one. Typically what happens
-is you use `group-by` or write some code to transform your collection into some kind of map to allow for fast lookup of its elements.
+is that you use `group-by` or write some code to transform your collection into some kind of map to allow for fast lookup of its elements.
 
 There are 3 problems that `idx` tries to solve:
 
-- proliferation of `-by-this` or `-by-that` type locals (or worse args, or keys) that only serve as fast paths to your actual data.
+- proliferation of `-by-this` or `-by-that` type locals (or worse, args or keys) that only serve as fast paths to your actual data.
 - allowing for profiler driven optimisation without massively restructuring the code.
 - index invalidation as data changes
 
-Lets say we have a large collection of orders, and a large collection of items, I want to join the groups of items for each order under the :items key.
+Let's say we have a large collection of orders and a large collection of items, and want to join the groups of items for each order under the `:items` key.
 
 Typical solution would look like this:
 ```clojure
@@ -63,7 +63,7 @@ Typical solution would look like this:
 ```
 
 Now this case is not too egregious, however in real code it is tempting to pass your indexes between functions, introducing accidental complexity to their signatures (the args would not be there if it were not for insufficient data structures).
-If you do not do that - you are often loosing gains by not sharing them as you repeatedly construct expensive indexes.
+If you do not do that, you are often losing gains by not sharing them as you repeatedly construct expensive indexes.
 
 Furthermore we often have to structure our code around the indexes, they are not easy to add and remove independent of the usages.
 
@@ -102,7 +102,7 @@ Kind is either:
 - `:idx/unique` for fast `identify` / `replace-by` calls.
 - `:idx/sort` for fast `ascending` / `descending` calls.
 
-The resulting indexing collection meets the interface of its (map/vector/set) input, if you add/associate/remove elements
+The resulting indexed collection meets the interface of its map/vector/set input. If you add, associate, or remove elements,
 the indexes will be maintained on your behalf.
 
 ### Automatically index your collection as it is queried.
@@ -146,6 +146,11 @@ Say you have a vector of numbers, and you want to find the negative ones, functi
 ;; => 
 (-5, -1)
 ```
+
+#### `lookup-keys`
+
+Like `lookup`, but returns the vector index, map key, or set element that identifies
+each match rather than returning the matched elements themselves.
 
 #### `identify`
 
@@ -199,7 +204,7 @@ you do not have to redundantly respecify the structure in the value position.
 (lookup numbers (match neg? true, even? true))
 ```
 
-They keys can be any property, and match nests.
+The keys can be any property, and `match` nests.
 
 This allows for some pretty extensive (and expensive!) indexes, but is useful to compose 
 a couple of properties together for composite keys.
@@ -215,12 +220,13 @@ In order to index a match, either use an `auto` coll or use the `:idx/value` pla
 ```clojure
 (index coll (match (path :user :id) :idx/value,
                    :carrier (match :country :idx/value :available :idx/value)
-                   :delivery-date :idx/value))
+                   :delivery-date :idx/value)
+            :idx/hash)
 ```
 
 #### `pred`
 
-`pred` creates a predicate that uses a truthy/falsey index. It can be used in the value position of matches.
+`pred` creates a predicate that uses a truthy/falsy index. It can be used in the value position of matches.
 
 ```clojure
 (match :foo (pred :has-bar))
@@ -230,7 +236,7 @@ pred is also useful to promote a function so it can be used
 in the predicate position of `lookup` / `identify` / `replace-by`.
 
 ```clojure
-(lookup :foo (pred even?))
+(lookup numbers (pred neg?))
 ```
 
 #### `pk`
@@ -249,9 +255,8 @@ Uses a unique one-to-one hash index if one is available.
 
 `pcomp` allows for function style composition of properties, takes 2 properties and returns a property.
 
-The property returned by `(pcomp a b)`
-
-Will be looked each property in turn. `(a (b element))`
+The property returned by `(pcomp a b)` applies each property in turn:
+`(a (b element))`.
 
 ### Modify your collection
 
@@ -264,6 +269,7 @@ Some handy functions are enabled due to the presence of indexes.
 #### `replace-by`
 
 Replaces an element in the collection identified by the property/value or predicate.
+
 If no element matches, the collection is returned unchanged.
 
 Uses a unique index if one is available (always true if you use [auto](#automatically-index-your-collection-as-it-is-queried))
@@ -295,8 +301,8 @@ Returns a new collection without the specified index(es), uses same index specif
 
 ### Properties 
 
-`idx` indexes elements against 'properties', which are objects implementing the Property protocol. By default
-an object used as a property is looked up as a key in the element. Which works well for the common use case of querying by key.
+`idx` indexes elements against 'properties', which are objects implementing the Property protocol. By default,
+an object used as a property is looked up as a key in the element. This works well for the common use case of querying by key.
 
 Functions implement Property, they are not looked up as keys, but rather applied to the element. 
 
@@ -313,7 +319,7 @@ There are a couple of useful property combinators [match](#match) and [pcomp](#p
 
 Several functions take predicates as arguments, a predicate composes a property with its expected value. This is how `match` works.
 
-You can lift any function into a truthy/falsey test with [pred](#pred).
+You can lift any function into a truthy/falsy test with [pred](#pred).
  
 #### Mutability 
 
@@ -366,7 +372,7 @@ Execution time mean : 5.673653 ms
 
 #### Lookups 
 
-Lookups are relatively cheap in all cases when indexes exist. When a scan is necessary performance is close or the same as to (filter). 
+Lookups are relatively cheap in all cases when indexes exist. When a scan is necessary, performance is close to `(filter)`.
 
 Lookups are somewhat slower than against equivalent maps, mostly because this library needs to contend with incremental index maintenance as collections change.
 
@@ -388,7 +394,7 @@ Looking up against a :idx/unique index with identify.
 Execution time mean : 127.409999 ns
 ```
 
-For comparison getting from the equiv map:
+For comparison, getting from the equivalent map:
 ```
 Execution time mean : 51.197166 ns
 ```

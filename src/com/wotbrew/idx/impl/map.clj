@@ -97,38 +97,38 @@
 
   IPersistentMap
   (assoc [this o o1]
-    (let [old-element (get this o ::not-found)]
-      (cond
-        (identical? o1 old-element) this
-        (identical? old-element ::not-found)
-        (IndexedPersistentMap.
-          (.assoc ^IPersistentMap m o o1)
-          (some-> eq (i/add-eq o o1))
-          (some-> uniq (i/add-uniq o o1))
-          (some-> sorted (i/add-sorted o o1))
-          auto)
-
-        :else
-        (IndexedPersistentMap.
-          (.assoc ^IPersistentMap m o o1)
-          (some-> eq (i/add-eq o old-element o1))
-          (some-> uniq (i/add-uniq o old-element o1))
-          (some-> sorted (i/add-sorted o old-element o1))
-          auto))))
+    (if-some [entry (find m o)]
+      (let [id (key entry)
+            old-element (val entry)]
+        (if (identical? o1 old-element)
+          this
+          (IndexedPersistentMap.
+            (.assoc ^IPersistentMap m o o1)
+            (some-> eq (i/add-eq id old-element o1))
+            (some-> uniq (i/add-uniq id old-element o1))
+            (some-> sorted (i/add-sorted id old-element o1))
+            auto)))
+      (IndexedPersistentMap.
+        (.assoc ^IPersistentMap m o o1)
+        (some-> eq (i/add-eq o o1))
+        (some-> uniq (i/add-uniq o o1))
+        (some-> sorted (i/add-sorted o o1))
+        auto)))
   (assocEx [this o o1]
     (if (contains? m o)
-      (throw (Exception. "Key already present"))
+      (throw (RuntimeException. "Key already present"))
       (assoc this o o1)))
   (without [this o]
-    (let [old-element (get this o ::not-found)]
-      (if (identical? ::not-found old-element)
-        this
+    (if-some [entry (find m o)]
+      (let [id (key entry)
+            old-element (val entry)]
         (IndexedPersistentMap.
           (.without ^IPersistentMap m o)
-          (some-> eq (i/del-eq o old-element))
+          (some-> eq (i/del-eq id old-element))
           (some-> uniq (i/del-uniq old-element))
-          (some-> sorted (i/del-sorted o old-element))
-          auto))))
+          (some-> sorted (i/del-sorted id old-element))
+          auto))
+      this))
   Counted
   Iterable
   (iterator [this] (.iterator ^Iterable m))

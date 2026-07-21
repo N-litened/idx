@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Fixed valid values colliding with internal `::not-found` sentinels, which could make vector/map updates no-op, leave stale indexes, or make `replace-by` miss map/set elements.
+- Fixed JVM indexed-vector `assoc` coercing fractional keys and rejecting large integer keys differently from a persistent vector.
+- Map index IDs now retain the actual backing-map key object when an equal, non-identical key is used for an update.
+- Unindexed queries over seqs and lists no longer copy the input into a temporary vector before scanning it.
+- JVM indexed-map `assocEx` now throws the same exception type as persistent maps.
+- Predicate value positions now accept any implementation of the predicate protocol, consistently with the two-argument query forms and manual indexing.
+- `match` now rejects an unpaired trailing property instead of silently treating its value as `nil`.
 - Fixed `conj` of a `[k v]` vector pair onto an indexed map throwing `IllegalArgumentException` (the pair check was inverted).
 - Fixed hash and sorted indexes serving stale elements after `assoc` replaced an element whose indexed property value was unchanged.
 - Fixed `index`/`delete-index` given a `match`/`pred` predicate: the underlying property is now indexed. Previously the created index could never be hit by queries.

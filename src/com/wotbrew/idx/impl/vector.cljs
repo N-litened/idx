@@ -143,10 +143,11 @@
   (-find [coll n] (-find v n))
   IVector
   (-assoc-n [coll i val]
-    (let [old-element (-nth v i ::not-found)]
+    (let [append? (= i (-count v))
+          old-element (when-not append? (-nth v i))]
       (cond
-        (identical? val old-element) coll
-        (= ::not-found old-element)
+        (and (not append?) (identical? val old-element)) coll
+        append?
         (IndexedPersistentVector.
           (-assoc-n v i val)
           (some-> eq (i/add-eq i val))

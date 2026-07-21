@@ -22,8 +22,12 @@
   (-get-sort [coll p] nil)
   (-del-index [coll p kind] coll)
   (-add-index [coll p kind] (-> (p/-wrap coll false) (p/-add-index p kind)))
-  (-elements [coll] (p/-elements (p/-wrap coll false)))
-  (-id-element-pairs [coll] (p/-id-element-pairs (p/-wrap coll false))))
+  (-elements [coll] (if (map? coll) (vals coll) coll))
+  (-id-element-pairs [coll]
+    (cond
+      (map? coll) (map (juxt key val) coll)
+      (set? coll) (map (fn [x] [x x]) coll)
+      :else (map-indexed vector coll))))
 
 (extend-protocol p/Property
   Fn

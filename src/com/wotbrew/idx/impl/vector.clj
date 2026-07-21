@@ -2,7 +2,7 @@
   (:require [com.wotbrew.idx.impl.protocols :as p]
             [com.wotbrew.idx.impl.index :as i])
   (:import (java.util RandomAccess List)
-           (clojure.lang IHashEq Counted IObj IMeta IPersistentVector Seqable Reversible Indexed IPersistentCollection IPersistentStack ILookup Associative IFn Sequential ArityException IReduceInit IKVReduce)))
+           (clojure.lang IHashEq Counted IObj IMeta IPersistentVector Seqable Reversible Indexed IPersistentCollection IPersistentStack ILookup Associative IFn Sequential ArityException IReduceInit IKVReduce Util)))
 
 (deftype IndexedPersistentVector
   [v
@@ -106,11 +106,12 @@
   IPersistentVector
   (length [this] (.length ^IPersistentVector v))
   (assocN [this i val]
-    (let [old-element (nth this i ::not-found)]
+    (let [append? (= i (count v))
+          old-element (when-not append? (nth v i))]
       (cond
-        (identical? val old-element) this
+        (and (not append?) (identical? val old-element)) this
 
-        (identical? old-element ::not-found)
+        append?
         (IndexedPersistentVector.
           (.assocN ^IPersistentVector v i val)
           (some-> eq (i/add-eq i val))
@@ -167,7 +168,10 @@
   Associative
   (containsKey [this key] (.containsKey ^Associative v key))
   (entryAt [this key] (.entryAt ^Associative v key))
-  (assoc [this key val] (.assocN ^IPersistentVector this (int key) val))
+  (assoc [this key val]
+    (if (Util/isInteger key)
+      (.assocN ^IPersistentVector this (.intValue ^Number key) val)
+      (throw (IllegalArgumentException. "Key must be integer"))))
   Object
   (hashCode [this] (.hashCode v))
   (equals [this obj] (.equals v obj))
