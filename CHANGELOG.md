@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed concurrent JVM queries auto-realising indexes for different properties losing one cache entry through an unsynchronised read/modify/write. This became a correctness bug once auto-realised unique indexes started enforcing later modifications: a lost declaration allowed duplicates. Cache publication now merges under the wrapper lock and uses volatile fields for visibility.
+- Deleting the last index of a kind now resets its outer maintenance map to `nil`; leaving `{}` behind made every later modification call an empty maintenance reducer, retaining substantial overhead after `delete-index`.
 - **Breaking**: `:idx/unique` now enforces uniqueness. Building the index throws if the property is not unique across the collection, and any modification that would introduce a duplicate indexed value throws an `ex-info` naming the property, value and both ids (updating the element that owns a value remains fine). This applies to auto-realised unique indexes too: `identify`/`pk`/`replace-by` on an `auto` collection declare the queried property unique. Plain (unwrapped) collections are unaffected — linear scan, first match. Previously duplicates were silently accepted (last-write-wins) and could permanently corrupt the index when either duplicate was later modified.
 - Fixed a severe JVM query slowdown (up to ~100x per call) introduced by detecting predicates with `satisfies?`, which caches no negative results on Clojure 1.10; queries now test the protocol's backing interface. JVM `Predicate` implementations must implement the protocol inline (`deftype`/`defrecord`/`reify`), not via `extend`.
 - Fixed set `disj` deleting index entries computed from the caller's argument rather than the stored member; `=`-but-property-divergent elements (e.g. metadata-based properties) no longer leave ghost index entries.
@@ -13,13 +15,13 @@
 - cljs: records now wrap as indexed maps like on the JVM, instead of being converted to a vector of map entries.
 - cljs: calling an indexed vector as a function now throws on a bad index like the host vector (previously returned nil).
 - Invoking a JVM indexed collection with an unsupported arity now throws `ArityException` exactly like the plain collection instead of `AbstractMethodError`.
-- JVM indexed collections are now `java.io.Serializable`, like the collections they wrap.
+- JVM indexed collections now implement `java.io.Serializable`. Serialization requires their backing data and realised/manual index properties (including captured closure state) to be serializable.
 - Wrapping a sorted map/set now throws with an explanatory message instead of returning a wrapper that silently breaks `subseq`/`rseq`/`sorted?`.
 - `lookup`/`lookup-keys` misses now return an empty collection on the indexed path, consistent with the unindexed scan path (previously nil).
 - `index`/`delete-index` now reject unpaired trailing varargs with a descriptive error, like `match`.
 - Docs: `match` docstring described a map argument it does not accept; README `match` example used a regex literal as a value (regex equality is identity, so it could never match); documented that `transient` is unsupported and why.
 - Docs: modifying a collection that has an ordering (`:idx/sort`) index — manually requested or realised by an `ascending`/`descending` query on an `auto` collection — with an element whose property value is not comparable with the indexed values is now documented as undefined behaviour (currently it throws, like conj onto a sorted-set; nil values are fine).
-- Docs: `:idx/unique` documented as not enforcing uniqueness — duplicate indexed values are silently accepted and are undefined behaviour; `replace-by` documented as defined only for vectors/maps/sets; documented the lazy-query-over-mutable-host-collection quirk and the subvec negative-assoc quirk.
+- Docs: `replace-by` documented as defined only for vectors/maps/sets; documented the lazy-query-over-mutable-host-collection quirk and the subvec negative-assoc quirk.
 - Added test-runner aliases exiting non-zero on failure: `clojure -M:dev:test-clj` (JVM) and `clojure -M:dev:test-cljs` (ClojureScript on node).
 - `(match ...)`/`(pred ...)` forms are now normalised to their underlying property in every property position — the 3-ary query forms (`(lookup coll (pred :a) true)`), `match` keys, and `ascending`/`descending` — matching how `index` already treated them. Previously these silently matched nothing (the predicate object was looked up as a key).
 - Fixed valid values colliding with internal `::not-found` sentinels, which could make vector/map updates no-op, leave stale indexes, or make `replace-by` miss map/set elements.

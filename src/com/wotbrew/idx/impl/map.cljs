@@ -50,15 +50,15 @@
     (case kind
       :idx/hash
       (if (get eq p)
-        (IndexedPersistentMap. m (dissoc eq p) uniq sorted auto)
+        (IndexedPersistentMap. m (not-empty (dissoc eq p)) uniq sorted auto)
         idx)
       :idx/unique
       (if (get uniq p)
-        (IndexedPersistentMap. m eq (dissoc uniq p) sorted auto)
+        (IndexedPersistentMap. m eq (not-empty (dissoc uniq p)) sorted auto)
         idx)
       :idx/sort
       (if (get sorted p)
-        (IndexedPersistentMap. m eq uniq (dissoc sorted p) auto)
+        (IndexedPersistentMap. m eq uniq (not-empty (dissoc sorted p)) auto)
         idx)))
   (-elements [idx] (vals m))
   (-id-element-pairs [idx] (map (juxt key val) m))

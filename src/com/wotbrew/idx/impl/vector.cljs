@@ -49,15 +49,15 @@
     (case kind
       :idx/hash
       (if (get eq p)
-        (IndexedPersistentVector. v (dissoc eq p) uniq sorted auto)
+        (IndexedPersistentVector. v (not-empty (dissoc eq p)) uniq sorted auto)
         idx)
       :idx/unique
       (if (get uniq p)
-        (IndexedPersistentVector. v eq (dissoc uniq p) sorted auto)
+        (IndexedPersistentVector. v eq (not-empty (dissoc uniq p)) sorted auto)
         idx)
       :idx/sort
       (if (get sorted p)
-        (IndexedPersistentVector. v eq uniq (dissoc sorted p) auto)
+        (IndexedPersistentVector. v eq uniq (not-empty (dissoc sorted p)) auto)
         idx)))
   (-elements [idx] v)
   (-id-element-pairs [idx] (map-indexed vector v))

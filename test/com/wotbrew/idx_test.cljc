@@ -344,6 +344,25 @@
         v2 (delete-index v (match :foo :idx/value :bar :idx/value) :idx/hash)]
     (is (nil? (p/-get-eq v2 (p/-prop (match :foo 1 :bar 2)))))))
 
+(defn- raw-index-fields [coll]
+  #?(:clj
+     (mapv (fn [field-name]
+             (let [field (doto (.getDeclaredField (class coll) field-name)
+                           (.setAccessible true))]
+               (.get field coll)))
+           ["eq" "uniq" "sorted"])
+     :cljs [(.-eq coll) (.-uniq coll) (.-sorted coll)]))
+
+(deftest delete-final-index-clears-maintenance-state-test
+  ;; An empty outer index map is truthy, so leaving {} behind makes every
+  ;; subsequent modification call the corresponding maintenance function even
+  ;; though there are no index definitions to maintain.
+  (doseq [coll [[{:p 1}] {:a {:p 1}} #{{:p 1}}]]
+    (let [indexed (index coll :p :idx/hash :p :idx/unique :p :idx/sort)
+          deleted (delete-index indexed :p :idx/hash :p :idx/unique :p :idx/sort)]
+      (is (= [nil nil nil] (raw-index-fields deleted)))
+      (is (= coll deleted)))))
+
 (deftest pcomp-test
   (let [coll [{:a {:b 1}} {:a {:b 2}}]]
     (is (= [{:a {:b 2}}] (vec (lookup coll (pcomp :b :a) 2))))
@@ -606,6 +625,62 @@
        (doseq [coll [(auto [1 2 3]) (auto {:a 1}) (auto #{1 2})
                      (index [{:id 1}] :id :idx/unique)]]
          (is (= coll (round-trip coll)))))))
+
+#?(:clj
+   (deftest serialization-requires-serializable-index-properties-test
+     (let [serialize (fn [x]
+                       (let [bos (java.io.ByteArrayOutputStream.)]
+                         (with-open [oos (java.io.ObjectOutputStream. bos)]
+                           (.writeObject oos x))))
+           opaque (Object.)
+           property (fn [x] (if (identical? opaque x) x x))
+           coll (auto [1])]
+       ;; Before the auto index exists, only the serializable backing value is
+       ;; in the object graph. Realising the index adds the property closure,
+       ;; including its deliberately non-serializable captured value.
+       (is (nil? (serialize coll)))
+       (lookup coll property 1)
+       (is (thrown? java.io.NotSerializableException (serialize coll))))))
+
+#?(:clj
+   (deftest concurrent-auto-unique-publication-test
+     ;; Force both threads to capture the old outer index map before either can
+     ;; publish. Before publication was merged under a lock, the second mutable
+     ;; assignment overwrote the first declaration and later duplicates for the
+     ;; lost property were silently accepted.
+     (doseq [[coll add-element]
+             [[(auto [{:a 1 :b 2}]) conj]
+              [(auto {:k {:a 1 :b 2}}) #(assoc %1 :other %2)]
+              [(auto #{{:a 1 :b 2}}) conj]]]
+       (let [p1 (fn [x] (:a x))
+             p2 (fn [x] (:b x))
+             original-assoc assoc
+             entered (java.util.concurrent.CountDownLatch. 2)
+             release (java.util.concurrent.CountDownLatch. 1)
+             gated-assoc (fn [m k v]
+                           (when (or (identical? k p1) (identical? k p2))
+                             (.countDown entered)
+                             ;; With correct locking the second publisher cannot
+                             ;; enter until this bounded wait ends. Without it,
+                             ;; both enter and deterministically assoc onto m=nil.
+                             (.await entered 250 java.util.concurrent.TimeUnit/MILLISECONDS)
+                             (.countDown release)
+                             (.await release))
+                           (original-assoc m k v))
+             pool (java.util.concurrent.Executors/newFixedThreadPool 2)]
+         (try
+           (with-redefs [clojure.core/assoc gated-assoc]
+             (let [f1 (.submit pool ^java.util.concurrent.Callable #(identify coll p1 1))
+                   f2 (.submit pool ^java.util.concurrent.Callable #(identify coll p2 2))]
+               (is (= {:a 1 :b 2} (.get f1 5 java.util.concurrent.TimeUnit/SECONDS)))
+               (is (= {:a 1 :b 2} (.get f2 5 java.util.concurrent.TimeUnit/SECONDS)))))
+           ;; Both successful queries declared their properties unique.
+           (is (thrown? clojure.lang.ExceptionInfo
+                        (add-element coll {:a 1 :b 3})))
+           (is (thrown? clojure.lang.ExceptionInfo
+                        (add-element coll {:a 3 :b 2})))
+           (finally
+             (.shutdownNow pool)))))))
 
 #?(:clj
    (deftest no-transient-support-test

@@ -6,33 +6,36 @@
 
 (deftype IndexedPersistentMap
   [m
-   ^:unsynchronized-mutable eq
-   ^:unsynchronized-mutable uniq
-   ^:unsynchronized-mutable sorted
+   ^:volatile-mutable eq
+   ^:volatile-mutable uniq
+   ^:volatile-mutable sorted
    ^boolean auto]
   p/Idx
   (-rewrap [idx a] (IndexedPersistentMap. m eq uniq sorted a))
   (-get-eq [idx p]
-    (or (when (some? eq) (eq p))
+    (or (get eq p)
         (when auto
-          (let [i (i/create-eq-from-associative m p)
-                eq (assoc eq p i)]
-            (set! (.-eq idx) eq)
-            i))))
+          (let [new-index (i/create-eq-from-associative m p)]
+            (locking idx
+              (or (get (.-eq idx) p)
+                  (do (set! (.-eq idx) (assoc (.-eq idx) p new-index))
+                      new-index)))))))
   (-get-uniq [idx p]
-    (or (when (some? uniq) (uniq p))
+    (or (get uniq p)
         (when auto
-          (let [i (i/create-uniq-from-associative m p)
-                uniq (assoc uniq p i)]
-            (set! (.-uniq idx) uniq)
-            i))))
+          (let [new-index (i/create-uniq-from-associative m p)]
+            (locking idx
+              (or (get (.-uniq idx) p)
+                  (do (set! (.-uniq idx) (assoc (.-uniq idx) p new-index))
+                      new-index)))))))
   (-get-sort [idx p]
-    (or (when (some? sorted) (sorted p))
+    (or (get sorted p)
         (when auto
-          (let [i (i/create-sorted-from-associative m p)
-                sorted (assoc sorted p i)]
-            (set! (.-sorted idx) sorted)
-            i))))
+          (let [new-index (i/create-sorted-from-associative m p)]
+            (locking idx
+              (or (get (.-sorted idx) p)
+                  (do (set! (.-sorted idx) (assoc (.-sorted idx) p new-index))
+                      new-index)))))))
   (-add-index [idx p kind]
     (case kind
       :idx/hash
@@ -51,15 +54,15 @@
     (case kind
       :idx/hash
       (if (get eq p)
-        (IndexedPersistentMap. m (dissoc eq p) uniq sorted auto)
+        (IndexedPersistentMap. m (not-empty (dissoc eq p)) uniq sorted auto)
         idx)
       :idx/unique
       (if (get uniq p)
-        (IndexedPersistentMap. m eq (dissoc uniq p) sorted auto)
+        (IndexedPersistentMap. m eq (not-empty (dissoc uniq p)) sorted auto)
         idx)
       :idx/sort
       (if (get sorted p)
-        (IndexedPersistentMap. m eq uniq (dissoc sorted p) auto)
+        (IndexedPersistentMap. m eq uniq (not-empty (dissoc sorted p)) auto)
         idx)))
   (-elements [idx] (vals m))
   (-id-element-pairs [idx] (map (juxt key val) m))

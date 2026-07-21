@@ -52,6 +52,10 @@ lein `[com.wotbrew/idx "0.1.3"]` or deps `com.wotbrew/idx {:mvn/version "0.1.3"}
 - Indexed collections do not support `transient`. This is deliberate: a transient view could not maintain the indexes, and
   handing back the bare backing collection would make functions like `into` (which prefer transients) silently drop your
   indexes. `into` an indexed collection works fine — it takes the `conj` path and keeps indexes fresh.
+- On the JVM, indexed collections implement `java.io.Serializable`. As with any serializable container, every object in the
+  serialized state must also be serializable. In addition to the backing collection, that state includes manually specified
+  and auto-realised index properties. Consequently, a query on an `auto` collection using a closure that captures a
+  non-serializable object can make later serialization fail even when the backing collection itself is serializable.
 - `:idx/unique` enforces uniqueness: creating the index throws if the property is not unique across the collection, and
   any modification that would introduce a duplicate indexed value throws an `ex-info` naming the property, value and ids.
   This includes auto-realised unique indexes — on an `auto` collection, querying with `identify`/`pk`/`replace-by`
