@@ -18,18 +18,46 @@
                (assoc! m ival (assoc (get m ival {}) id v))))]
     (persistent! (reduce rf (transient {}) (p/-id-element-pairs coll)))))
 
+(defn- uniqueness-violation
+  ([p v id]
+   (ex-info "cannot build :idx/unique index: property is not unique across the collection"
+            {:idx/property p, :idx/value v, :idx/id id}))
+  ([p v existing-id id]
+   (ex-info "unique index violation: another element already has this property value"
+            {:idx/property p, :idx/value v, :idx/existing-id existing-id, :idx/id id})))
+
+;; :idx/unique enforces uniqueness: index construction and every modification
+;; throw on a violation instead of silently last-write-winning (which used to
+;; leave the index permanently corrupted once either duplicate was touched).
+;; This applies to auto-realised unique indexes too — identify/pk/replace-by on
+;; an auto collection declare the queried property unique. Plain (unwrapped)
+;; collections keep plain first-match linear scans.
+
 (defn create-uniq-from-associative
   [m p]
-  (let [rf (fn [m id v]
-             (let [ival (p/-property p v)]
-               (assoc! m ival id)))]
+  (let [rf (fn [t id v]
+             (let [ival (p/-property p v)
+                   n (count t)
+                   t (assoc! t ival id)]
+               ;; duplicates are detected by the count not growing after
+               ;; assoc!, NOT by probing with a not-found sentinel: values and
+               ;; ids are arbitrary user data, so no sentinel is collision-free
+               ;; (that bug class was purged from this library once already)
+               (if (== n (count t))
+                 (throw (uniqueness-violation p ival id))
+                 t)))]
     (persistent! (reduce-kv rf (transient {}) m))))
 
 (defn create-unique-from-elements
   [coll p]
-  (let [rf (fn [m [id v]]
-             (let [ival (p/-property p v)]
-               (assoc! m ival id)))]
+  (let [rf (fn [t [id v]]
+             (let [ival (p/-property p v)
+                   n (count t)
+                   t (assoc! t ival id)]
+               ;; see create-uniq-from-associative for the count-based check
+               (if (== n (count t))
+                 (throw (uniqueness-violation p ival id))
+                 t)))]
     (persistent! (reduce rf (transient {}) (p/-id-element-pairs coll)))))
 
 (defn create-sorted-from-associative
@@ -92,9 +120,13 @@
   ([unq id element]
    (reduce-kv
      (fn [unq p i]
-       (let [v (p/-property p element)
-             i (assoc i v id)]
-         (assoc unq p i)))
+       (let [v (p/-property p element)]
+         ;; find (not get/sentinel): ids can legitimately be nil (nil map keys)
+         (if-some [kv (find i v)]
+           (if (= (val kv) id)
+             (assoc unq p (assoc i v id))
+             (throw (uniqueness-violation p v (val kv) id)))
+           (assoc unq p (assoc i v id)))))
      unq
      unq))
   ([unq id old-element element]
@@ -104,11 +136,16 @@
              v (p/-property p element)]
          (cond
            (and (= id (i v)) (= ov v)) unq
+           ;; replacing the element that owns this value with an equal-valued
+           ;; one — the owner keeps the slot, never a violation
            (= ov v) (assoc unq p (assoc i v id))
            :else
-           (let [i (dissoc i ov)
-                 i (assoc i v id)]
-             (assoc unq p i)))))
+           ;; value changed: the new value's slot must be free (or already ours)
+           (if-some [kv (find i v)]
+             (if (= (val kv) id)
+               (assoc unq p (-> i (dissoc ov) (assoc v id)))
+               (throw (uniqueness-violation p v (val kv) id)))
+             (assoc unq p (-> i (dissoc ov) (assoc v id)))))))
      unq
      unq)))
 

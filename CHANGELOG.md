@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Breaking**: `:idx/unique` now enforces uniqueness. Building the index throws if the property is not unique across the collection, and any modification that would introduce a duplicate indexed value throws an `ex-info` naming the property, value and both ids (updating the element that owns a value remains fine). This applies to auto-realised unique indexes too: `identify`/`pk`/`replace-by` on an `auto` collection declare the queried property unique. Plain (unwrapped) collections are unaffected — linear scan, first match. Previously duplicates were silently accepted (last-write-wins) and could permanently corrupt the index when either duplicate was later modified.
 - Fixed a severe JVM query slowdown (up to ~100x per call) introduced by detecting predicates with `satisfies?`, which caches no negative results on Clojure 1.10; queries now test the protocol's backing interface. JVM `Predicate` implementations must implement the protocol inline (`deftype`/`defrecord`/`reify`), not via `extend`.
 - Fixed set `disj` deleting index entries computed from the caller's argument rather than the stored member; `=`-but-property-divergent elements (e.g. metadata-based properties) no longer leave ghost index entries.
 - cljs: fixed `disj` of an absent element corrupting unique indexes, and `conj` of an already-present element double-indexing it (the identity-based no-op guards never fire on cljs sets, which always allocate).

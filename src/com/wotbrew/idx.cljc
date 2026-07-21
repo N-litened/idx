@@ -16,6 +16,11 @@
   collection so that stops being true is undefined behaviour (currently it throws, like
   conj onto a sorted-set). nil property values are fine (they sort first).
 
+  Note: an identify/pk/replace-by query realises a unique index on the queried property,
+  which enforces uniqueness — querying this way declares the property unique, and an
+  ex-info is thrown if it is not (or a later modification would make it not be). Use
+  lookup for properties that are not one-to-one.
+
   The coll must be a vector, map or set. If you pass a seq/seqable/iterable it is converted to a vector.
   Sorted maps/sets are not supported and will throw (the wrapper could not support subseq/rseq/sorted?).
 
@@ -68,12 +73,12 @@
   behaviour (currently it throws, like conj onto a sorted-set). nil property
   values are fine (they sort first).
 
-  `:idx/unique` does not enforce uniqueness: adding an element whose indexed value
-  duplicates another element's is silently accepted, and is undefined behaviour —
-  the index keeps a single arbitrary (currently last-written) mapping, and a later
-  update or removal of either duplicate can permanently drop the surviving
-  element's entry until the index is rebuilt. Keeping the property unique is the
-  caller's responsibility.
+  `:idx/unique` enforces uniqueness: creating the index throws ex-info if the
+  property is not unique across the collection, and any modification that would
+  make it non-unique (e.g. conj'ing an element that duplicates another element's
+  indexed value) throws ex-info naming the property, value and ids. Updating the
+  element that owns a value is fine. Note that elements missing the property all
+  yield nil, and nil counts as a value — two such elements violate uniqueness.
 
   The coll must be a vector, map or set. If you pass a seq/seqable/iterable it is converted to a vector.
   Sorted maps/sets are not supported and will throw (the wrapper could not support subseq/rseq/sorted?).
@@ -245,7 +250,11 @@
 (defn identify
   "Returns the element where the property equals v.
 
-  Behaviour is undefined if (p element) does not return a unique value across the collection."
+  On indexed or auto collections this uses a :idx/unique index, and uniqueness is
+  enforced: realising the index — querying declares the property unique — or later
+  modifying the collection throws ex-info if the property is not (or would stop
+  being) unique. On plain collections a linear scan returns the first match,
+  without enforcement."
   ([coll pred] (identify coll (p/-prop pred) (p/-predv pred)))
   ([coll p v]
    (let [p (as-property p)]
@@ -262,7 +271,10 @@
 
   Returns nil when nothing matches. Note this is ambiguous when the matching
   element's key is itself nil (e.g. a nil map key) — use identify if you need
-  to distinguish those cases."
+  to distinguish those cases.
+
+  Uniqueness is enforced on indexed/auto collections exactly as for identify
+  (see its docstring); plain collections linear-scan to the first match."
   ([coll pred] (pk coll (p/-prop pred) (p/-predv pred)))
   ([coll p v]
    (let [p (as-property p)]
@@ -286,7 +298,10 @@
   (the collections idx can wrap); calling it on other collections such as lists or
   lazy seqs is unsupported.
 
-  Behaviour is undefined if (p element) does not return a unique value across the collection."
+  Uniqueness is enforced on indexed/auto collections exactly as for identify (see
+  its docstring), both for the lookup and for the replacement itself — replacing an
+  element with one that duplicates ANOTHER element's indexed value throws ex-info.
+  Plain collections linear-scan to the first match."
   ([coll pred element] (replace-by coll (p/-prop pred) (p/-predv pred) element))
   ([coll p v element]
    (let [p (as-property p)]

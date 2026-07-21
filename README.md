@@ -52,8 +52,11 @@ lein `[com.wotbrew/idx "0.1.3"]` or deps `com.wotbrew/idx {:mvn/version "0.1.3"}
 - Indexed collections do not support `transient`. This is deliberate: a transient view could not maintain the indexes, and
   handing back the bare backing collection would make functions like `into` (which prefer transients) silently drop your
   indexes. `into` an indexed collection works fine — it takes the `conj` path and keeps indexes fresh.
-- `:idx/unique` does not enforce uniqueness — duplicate indexed values are silently accepted and are undefined behaviour
-  (see the `index` docstring). Keeping the property unique is your responsibility.
+- `:idx/unique` enforces uniqueness: creating the index throws if the property is not unique across the collection, and
+  any modification that would introduce a duplicate indexed value throws an `ex-info` naming the property, value and ids.
+  This includes auto-realised unique indexes — on an `auto` collection, querying with `identify`/`pk`/`replace-by`
+  declares the property unique. Plain (unwrapped) collections keep plain behavior (linear scan, first match). Note that
+  elements missing the property all yield `nil`, and `nil` counts as a value — two such elements violate uniqueness.
 - Quirk: query results over plain (unwrapped) mutable host collections (e.g. Java lists) are lazy where possible and read
   the live collection, so mutations made before the result is realised will be observed. Realise eagerly (`vec`/`doall`)
   if you need a snapshot.
@@ -175,9 +178,12 @@ each match rather than returning the matched elements themselves.
 
 Uses a one-to-one hash index if available.
 
-`identify` operates on unique properties and predicates. Behaviour is undefined 
-if the property is not unique across the collection (an arbitrary matching element 
-may be returned). Good for by-id type queries.
+`identify` operates on unique properties and predicates. Good for by-id type queries.
+
+On indexed and `auto` collections uniqueness is enforced: querying with `identify` (or `pk`/`replace-by`) declares the
+property unique, and an `ex-info` is thrown if it is not — or if a later modification would make it not be. On plain
+collections a linear scan returns the first match, without enforcement. Use `lookup` for properties that are not
+one-to-one.
 
 ```clojure 
 (def users [{:id 32344, :name "Fred"} ...])

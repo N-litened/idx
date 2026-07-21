@@ -468,6 +468,69 @@
     (is (= [1 2 3] (sort (auto [3 1 2]))))
     #?(:clj (is (= [2 3] (subvec v 1))))))
 
+(deftest unique-enforcement-test
+  (let [thrown (fn [thunk]
+                 (try (thunk) nil
+                      (catch #?(:clj clojure.lang.ExceptionInfo :cljs js/Error) e e)))]
+    ;; building a manual :idx/unique index over non-unique data throws, for
+    ;; every collection kind
+    (is (some? (thrown #(index [{:p 1} {:p 1}] :p :idx/unique))))
+    (is (some? (thrown #(index {:a {:p 1} :b {:p 1}} :p :idx/unique))))
+    (is (some? (thrown #(index #{{:p 1 :x 1} {:p 1 :x 2}} :p :idx/unique))))
+    ;; elements missing the property all yield nil; nil counts as a value
+    (is (some? (thrown #(index [{:a 1} {:b 2}] :p :idx/unique))))
+
+    ;; modifications that would introduce a duplicate throw, with descriptive data
+    (let [u (index [{:p 1} {:p 2}] :p :idx/unique)]
+      (let [e (thrown #(conj u {:p 1}))]
+        (is (some? e))
+        (is (= :p (:idx/property (ex-data e))))
+        (is (= 1 (:idx/value (ex-data e))))
+        (is (= 0 (:idx/existing-id (ex-data e))))
+        (is (= 2 (:idx/id (ex-data e)))))
+      ;; moving a value onto an id that doesn't own it throws
+      (is (some? (thrown #(assoc u 1 {:p 1}))))
+      ;; updating the element that owns the value is fine
+      (is (= [{:p 1 :extra true} {:p 2}] (assoc u 0 {:p 1 :extra true})))
+      ;; replace-by keeping the matched value is fine; stealing another's throws
+      (is (= [{:p 1 :v 2} {:p 2}] (replace-by u :p 1 {:p 1 :v 2})))
+      (is (some? (thrown #(replace-by u :p 2 {:p 1}))))
+      ;; removal frees the value for reuse
+      (is (= [{:p 1} {:p 2 :new true}] (conj (pop u) {:p 2 :new true})))
+      ;; a swap through an intermediate value works
+      (is (= [{:p 3} {:p 1}] (-> u (assoc 0 {:p 3}) (assoc 1 {:p 1}))))
+      ;; empty preserves the index definition AND its enforcement
+      (is (some? (thrown #(-> (empty u) (conj {:p 9}) (conj {:p 9 :x 1}))))))
+
+    ;; map and set modification paths enforce too
+    (let [um (index {:a {:p 1}} :p :idx/unique)]
+      (is (some? (thrown #(assoc um :b {:p 1}))))
+      (is (= {:a {:p 2}} (assoc um :a {:p 2})))
+      (is (= {:b {:p 1}} (-> um (dissoc :a) (assoc :b {:p 1})))))
+    (let [us (index #{{:p 1 :x 1}} :p :idx/unique)]
+      (is (some? (thrown #(conj us {:p 1 :x 2}))))
+      ;; conj of an = element is a content no-op, never a violation
+      (is (= us (conj us {:p 1 :x 1}))))
+
+    ;; auto collections: identify/pk/replace-by DECLARE the property unique —
+    ;; realising the index over duplicated data throws at query time...
+    (is (some? (thrown #(identify (auto [{:p 1} {:p 1}]) :p 1))))
+    (is (some? (thrown #(pk (auto [{:p 1} {:p 1}]) :p 1))))
+    (is (some? (thrown #(replace-by (auto [{:p 1} {:p 1}]) :p 1 {:p 9}))))
+    ;; ...and a warmed auto unique index enforces later modifications
+    (let [av (auto [{:p 1} {:p 2}])]
+      (is (= {:p 1} (identify av :p 1)))
+      (is (some? (thrown #(conj av {:p 2 :dup true})))))
+
+    ;; plain collections keep plain behavior: linear scan, first match, no throw
+    (is (= {:p 1} (identify [{:p 1} {:p 1 :second true}] :p 1)))
+    (is (= 0 (pk [{:p 1} {:p 1 :second true}] :p 1)))
+
+    ;; multi-valued queries and sort indexes are NOT uniqueness-constrained
+    (let [av (auto [{:p 1} {:p 1 :second true}])]
+      (is (= 2 (count (lookup av :p 1))))
+      (is (= 2 (count (ascending av :p >= 0)))))))
+
 (deftest predicate-in-property-position-test
   ;; a match/pred form used where a property is expected is normalised to its
   ;; underlying property (its own expected value is ignored; the supplied v is
@@ -564,6 +627,16 @@
      [identity :idx/unique]
      [hash :idx/sort]]))
 
+;; :idx/unique enforces uniqueness (throws on duplicates), so wrapper-vs-plain
+;; equality through arbitrary random ops can only hold for non-unique kinds —
+;; the vector/map equality props use this pool. (Set elements are distinct by
+;; construction, so identity-unique never throws there and the set props keep
+;; the full pool.)
+(def non-unique-index-pair
+  (gen/elements
+    [[identity :idx/hash]
+     [hash :idx/sort]]))
+
 ;; vectors
 
 (def i-vec-pair
@@ -587,27 +660,35 @@
   {:vec-equality-holds-through-conj
    (prop/for-all [v (gen/vector gen/any-printable-equatable)
                   e gen/any-printable-equatable
-                  indexes (gen/vector index-pair)]
+                  indexes (gen/vector non-unique-index-pair)]
      (same-vec? (conj v e) (conj (apply index v (mapcat identity indexes)) e)))
 
 
    :vec-equality-holds-through-pop
    (prop/for-all [v (gen/vector gen/any-printable-equatable 1 100)
-                  indexes (gen/vector index-pair)]
+                  indexes (gen/vector non-unique-index-pair)]
      (same-vec? (pop v) (pop (apply index v (mapcat identity indexes)))))
 
    :vec-equality-holds-through-assoc
    (prop/for-all [[i v] i-vec-pair
                   e gen/any-printable-equatable
-                  indexes (gen/vector index-pair)]
+                  indexes (gen/vector non-unique-index-pair)]
      (same-vec? (assoc v i e) (assoc (apply index v (mapcat identity indexes)) i e)))
 
    :vec-identity-lookup-equality
-   (prop/for-all [v (gen/vector gen/any-printable-equatable)
+   ;; unique indexes need unique data: distinct base vector, and conj of an
+   ;; element already present must throw (enforcement) instead of identifying.
+   ;; membership is probed with a hash-set, NOT (some #(= e %) ...): the index
+   ;; is a hash-map, and hash and = disagree for e.g. 0.0 vs -0.0, exactly as
+   ;; in plain Clojure collections
+   (prop/for-all [v (gen/vector-distinct gen/any-printable-equatable)
                   e gen/any-printable-equatable]
-     (let [v (index v identity :idx/unique)
-           v (conj v e)]
-       (is (= e (identify v identity e)))))
+     (let [iv (index v identity :idx/unique)]
+       (if (contains? (set v) e)
+         ;; boolean: (is (thrown? ...)) returns the caught exception on success,
+         ;; and test.check treats any Throwable result as a FAILING property
+         (boolean (is (thrown? #?(:clj clojure.lang.ExceptionInfo :cljs js/Error) (conj iv e))))
+         (is (= e (identify (conj iv e) identity e))))))
 
    :vec-hash-membership
    (prop/for-all [v (gen/vector gen/any-printable-equatable)
@@ -650,24 +731,27 @@
    (prop/for-all [m (gen/map gen/any-printable-equatable gen/any-printable-equatable)
                   k gen/any-printable-equatable
                   v gen/any-printable-equatable
-                  indexes (gen/vector index-pair)]
+                  indexes (gen/vector non-unique-index-pair)]
      (same-map? (conj m {k v}) (conj (apply index m (mapcat identity indexes)) {k v})))
 
    :map-equality-holds-through-dissoc
    (prop/for-all [[k m] key-map-pair
-                  indexes (gen/vector index-pair)]
+                  indexes (gen/vector non-unique-index-pair)]
      (same-map? (dissoc m k) (dissoc (apply index m (mapcat identity indexes)) k)))
 
    :map-equality-holds-through-assoc
    (prop/for-all [[k m] key-map-pair
                   e gen/any-printable-equatable
-                  indexes (gen/vector index-pair)]
+                  indexes (gen/vector non-unique-index-pair)]
      (same-map? (assoc m k e) (assoc (apply index m (mapcat identity indexes)) k e)))
 
    :map-identity-lookup-equality
-   (prop/for-all [m (gen/map gen/any-printable-equatable gen/any-printable-equatable)
+   ;; identity over map VALUES must be unique, so build the map from a distinct
+   ;; vector with key = value; {e e} then either updates the entry that already
+   ;; owns the value (key e owns value e) or adds a fresh one — never a violation
+   (prop/for-all [xs (gen/vector-distinct gen/any-printable-equatable)
                   e gen/any-printable-equatable]
-     (let [m (index m identity :idx/unique)
+     (let [m (index (zipmap xs xs) identity :idx/unique)
            m (conj m {e e})]
        (is (= e (identify m identity e)))))
 
