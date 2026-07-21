@@ -164,8 +164,13 @@
   IKVReduce
   (-kv-reduce [coll f init] (-kv-reduce m f init))
   IReduce
-  (-reduce [coll f] (-reduce m f))
-  (-reduce [coll f start] (-reduce m f start))
+  ;; route through cljs.core/reduce, NOT (-reduce m ...): in cljs only
+  ;; PersistentArrayMap implements IReduce (hash maps — any map over 8 entries —
+  ;; do not), so a direct protocol call would crash. Because this deftype
+  ;; declares IReduce, cljs.core/reduce always dispatches here first; the inner
+  ;; reduce then picks whatever strategy the backing map actually supports.
+  (-reduce [coll f] (reduce f m))
+  (-reduce [coll f start] (reduce f start m))
   IEquiv
   (-equiv [o other] (-equiv m other))
   IHash

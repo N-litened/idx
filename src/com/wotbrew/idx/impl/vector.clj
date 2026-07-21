@@ -2,7 +2,7 @@
   (:require [com.wotbrew.idx.impl.protocols :as p]
             [com.wotbrew.idx.impl.index :as i])
   (:import (java.util RandomAccess List)
-           (clojure.lang IHashEq Counted IObj IMeta IPersistentVector Seqable Reversible Indexed IPersistentCollection IPersistentStack ILookup Associative IFn Sequential ArityException IReduceInit IKVReduce Util)))
+           (clojure.lang IHashEq Counted IObj IMeta IPersistentVector Seqable Reversible Indexed IPersistentCollection IPersistentStack ILookup Associative IFn Sequential IReduce IKVReduce Util)))
 
 (deftype IndexedPersistentVector
   [v
@@ -177,15 +177,48 @@
   (equals [this obj] (.equals v obj))
   (toString [this] (.toString v))
   Sequential
+  ;; plain persistent collections are Serializable; without this marker
+  ;; ObjectOutputStream refuses the wrapper where it accepts the plain coll
+  java.io.Serializable
   IFn
-  (invoke [this arg1] (.invoke ^IFn v arg1))
-  (invoke [this arg1 arg2] (.invoke ^IFn v arg1 arg2))
+  ;; every arity delegates to the backing collection — including the wrong ones
+  ;; — because deftype leaves unimplemented interface methods abstract, and an
+  ;; AbstractMethodError is an Error (uncatchable via `catch Exception`) whereas
+  ;; the plain collection throws ArityException, with a message naming the
+  ;; backing class rather than this wrapper
+  (invoke [this] (.invoke ^IFn v))
+  (invoke [this a1] (.invoke ^IFn v a1))
+  (invoke [this a1 a2] (.invoke ^IFn v a1 a2))
+  (invoke [this a1 a2 a3] (.invoke ^IFn v a1 a2 a3))
+  (invoke [this a1 a2 a3 a4] (.invoke ^IFn v a1 a2 a3 a4))
+  (invoke [this a1 a2 a3 a4 a5] (.invoke ^IFn v a1 a2 a3 a4 a5))
+  (invoke [this a1 a2 a3 a4 a5 a6] (.invoke ^IFn v a1 a2 a3 a4 a5 a6))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7] (.invoke ^IFn v a1 a2 a3 a4 a5 a6 a7))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8] (.invoke ^IFn v a1 a2 a3 a4 a5 a6 a7 a8))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9] (.invoke ^IFn v a1 a2 a3 a4 a5 a6 a7 a8 a9))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10] (.invoke ^IFn v a1 a2 a3 a4 a5 a6 a7 a8 a9 a10))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11] (.invoke ^IFn v a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12] (.invoke ^IFn v a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13] (.invoke ^IFn v a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14] (.invoke ^IFn v a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15] (.invoke ^IFn v a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16] (.invoke ^IFn v a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17] (.invoke ^IFn v a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17 a18] (.invoke ^IFn v a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17 a18))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17 a18 a19] (.invoke ^IFn v a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17 a18 a19))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17 a18 a19 a20] (.invoke ^IFn v a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17 a18 a19 a20))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17 a18 a19 a20 rest] (.invoke ^IFn v a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17 a18 a19 a20 rest))
   (applyTo [this arglist] (apply v arglist))
   Callable
-  (call [this] (throw (ArityException. 0 "IndexedPersistentVector")))
+  (call [this] (.call ^Callable v))
   Runnable
-  (run [this] (throw (ArityException. 0 "IndexedPersistentVector")))
-  IReduceInit
+  (run [this] (.run ^Runnable v))
+  ;; IReduce, not just IReduceInit: clojure.core.protocols implements no-init
+  ;; (reduce f coll) for IReduceInit collections with an unconditional cast to
+  ;; IReduce, so implementing only IReduceInit makes (reduce + wrapper) throw
+  ;; ClassCastException where the plain vector works
+  IReduce
+  (reduce [this f] (reduce f v))
   (reduce [this f init] (reduce f init v))
   IKVReduce
   (kvreduce [this f init] (reduce-kv f init v)))

@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Fixed a severe JVM query slowdown (up to ~100x per call) introduced by detecting predicates with `satisfies?`, which caches no negative results on Clojure 1.10; queries now test the protocol's backing interface. JVM `Predicate` implementations must implement the protocol inline (`deftype`/`defrecord`/`reify`), not via `extend`.
+- Fixed set `disj` deleting index entries computed from the caller's argument rather than the stored member; `=`-but-property-divergent elements (e.g. metadata-based properties) no longer leave ghost index entries.
+- cljs: fixed `disj` of an absent element corrupting unique indexes, and `conj` of an already-present element double-indexing it (the identity-based no-op guards never fire on cljs sets, which always allocate).
+- cljs: fixed fractional `assoc` keys on indexed vectors (accepted for host parity) corrupting indexes by recording the fractional key as the element id; out-of-bounds `assoc` now throws exactly the host vector's error again.
+- Fixed `(reduce f coll)` without an init value throwing `ClassCastException` on JVM indexed vectors (missing `IReduce`).
+- cljs: fixed `reduce`/`into` crashing on indexed maps of more than 8 entries (`IReduce` was delegated to backing maps that don't implement it).
+- cljs: fixed vars, `with-meta`'d functions and multimethods used as properties silently matching nothing (they were looked up as keys); multimethods are now invoked on the JVM too.
+- cljs: records now wrap as indexed maps like on the JVM, instead of being converted to a vector of map entries.
+- cljs: calling an indexed vector as a function now throws on a bad index like the host vector (previously returned nil).
+- Invoking a JVM indexed collection with an unsupported arity now throws `ArityException` exactly like the plain collection instead of `AbstractMethodError`.
+- JVM indexed collections are now `java.io.Serializable`, like the collections they wrap.
+- Wrapping a sorted map/set now throws with an explanatory message instead of returning a wrapper that silently breaks `subseq`/`rseq`/`sorted?`.
+- `lookup`/`lookup-keys` misses now return an empty collection on the indexed path, consistent with the unindexed scan path (previously nil).
+- `index`/`delete-index` now reject unpaired trailing varargs with a descriptive error, like `match`.
+- Docs: `match` docstring described a map argument it does not accept; README `match` example used a regex literal as a value (regex equality is identity, so it could never match); documented that `transient` is unsupported and why.
 - Fixed valid values colliding with internal `::not-found` sentinels, which could make vector/map updates no-op, leave stale indexes, or make `replace-by` miss map/set elements.
 - Fixed JVM indexed-vector `assoc` coercing fractional keys and rejecting large integer keys differently from a persistent vector.
 - Map index IDs now retain the actual backing-map key object when an equal, non-identical key is used for an update.

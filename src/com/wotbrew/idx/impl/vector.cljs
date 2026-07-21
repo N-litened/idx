@@ -142,32 +142,45 @@
   IFind
   (-find [coll n] (-find v n))
   IVector
+  ;; mirrors the host PersistentVector -assoc-n cond structure exactly. Host
+  ;; cljs vectors accept FRACTIONAL keys in the in-bounds branch (their bit ops
+  ;; truncate to an integer slot), so for content parity we accept them too —
+  ;; but the index id must be the EFFECTIVE integer slot (int i), not the raw
+  ;; key, or the old element is deleted under the wrong id and lingers in every
+  ;; index. Out-of-bounds keys are delegated to the backing vector so the
+  ;; thrown error is exactly the host's.
   (-assoc-n [coll i val]
-    (let [append? (= i (-count v))
-          old-element (when-not append? (-nth v i))]
+    (let [cnt (-count v)]
       (cond
-        (and (not append?) (identical? val old-element)) coll
-        append?
+        (and (<= 0 i) (< i cnt))
+        (let [id (int i)
+              old-element (-nth v id)]
+          (if (identical? val old-element)
+            coll
+            (IndexedPersistentVector.
+              (-assoc-n v i val)
+              (some-> eq (i/add-eq id old-element val))
+              (some-> uniq (i/add-uniq id old-element val))
+              (some-> sorted (i/add-sorted id old-element val))
+              auto)))
+        (== i cnt)
         (IndexedPersistentVector.
           (-assoc-n v i val)
-          (some-> eq (i/add-eq i val))
-          (some-> uniq (i/add-uniq i val))
-          (some-> sorted (i/add-sorted i val))
+          (some-> eq (i/add-eq cnt val))
+          (some-> uniq (i/add-uniq cnt val))
+          (some-> sorted (i/add-sorted cnt val))
           auto)
-        :else
-        (IndexedPersistentVector.
-          (-assoc-n v i val)
-          (some-> eq (i/add-eq i old-element val))
-          (some-> uniq (i/add-uniq i old-element val))
-          (some-> sorted (i/add-sorted i old-element val))
-          auto))))
+        :else (-assoc-n v i val))))
   IReduce
   (-reduce [coll f] (-reduce v f))
   (-reduce [coll f init] (-reduce v f init))
   IKVReduce
   (-kv-reduce [coll f init] (-kv-reduce v f init))
   IFn
-  (-invoke [coll k] (-lookup v k))
+  ;; host cljs vectors -invoke arity 1 via -nth (throws on a bad index), not
+  ;; -lookup; get-semantics here would silently return nil where ([1 2 3] 5)
+  ;; throws (and where the JVM wrapper throws)
+  (-invoke [coll k] (-nth v k))
   (-invoke [coll k not-found] (-lookup v k not-found))
   IReversible
   (-rseq [coll] (-rseq v))

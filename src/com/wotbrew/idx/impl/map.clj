@@ -1,7 +1,7 @@
 (ns com.wotbrew.idx.impl.map
   (:require [com.wotbrew.idx.impl.protocols :as p]
             [com.wotbrew.idx.impl.index :as i])
-  (:import (clojure.lang IKVReduce ArityException IPersistentCollection ILookup IPersistentMap Associative IMeta IObj MapEquivalence IHashEq IFn Counted Seqable)
+  (:import (clojure.lang IKVReduce IPersistentCollection ILookup IPersistentMap Associative IMeta IObj MapEquivalence IHashEq IFn Counted Seqable)
            (java.util Map$Entry Map)))
 
 (deftype IndexedPersistentMap
@@ -87,12 +87,40 @@
   (withMeta [this mta] (IndexedPersistentMap. (.withMeta ^IObj m mta) eq uniq sorted auto))
 
   MapEquivalence
+  ;; plain persistent collections are Serializable; without this marker
+  ;; ObjectOutputStream refuses the wrapper where it accepts the plain coll
+  java.io.Serializable
   IHashEq
   (hasheq [this] (.hasheq ^IHashEq m))
 
   IFn
-  (invoke [this o] (.invoke ^IFn m o))
-  (invoke [this o o1] (.invoke ^IFn m o o1))
+  ;; every arity delegates to the backing collection — including the wrong ones
+  ;; — because deftype leaves unimplemented interface methods abstract, and an
+  ;; AbstractMethodError is an Error (uncatchable via `catch Exception`) whereas
+  ;; the plain collection throws ArityException, with a message naming the
+  ;; backing class rather than this wrapper
+  (invoke [this] (.invoke ^IFn m))
+  (invoke [this a1] (.invoke ^IFn m a1))
+  (invoke [this a1 a2] (.invoke ^IFn m a1 a2))
+  (invoke [this a1 a2 a3] (.invoke ^IFn m a1 a2 a3))
+  (invoke [this a1 a2 a3 a4] (.invoke ^IFn m a1 a2 a3 a4))
+  (invoke [this a1 a2 a3 a4 a5] (.invoke ^IFn m a1 a2 a3 a4 a5))
+  (invoke [this a1 a2 a3 a4 a5 a6] (.invoke ^IFn m a1 a2 a3 a4 a5 a6))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7] (.invoke ^IFn m a1 a2 a3 a4 a5 a6 a7))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8] (.invoke ^IFn m a1 a2 a3 a4 a5 a6 a7 a8))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9] (.invoke ^IFn m a1 a2 a3 a4 a5 a6 a7 a8 a9))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10] (.invoke ^IFn m a1 a2 a3 a4 a5 a6 a7 a8 a9 a10))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11] (.invoke ^IFn m a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12] (.invoke ^IFn m a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13] (.invoke ^IFn m a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14] (.invoke ^IFn m a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15] (.invoke ^IFn m a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16] (.invoke ^IFn m a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17] (.invoke ^IFn m a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17 a18] (.invoke ^IFn m a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17 a18))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17 a18 a19] (.invoke ^IFn m a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17 a18 a19))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17 a18 a19 a20] (.invoke ^IFn m a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17 a18 a19 a20))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17 a18 a19 a20 rest] (.invoke ^IFn m a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17 a18 a19 a20 rest))
   (applyTo [this arglist] (apply m arglist))
 
   IPersistentMap
@@ -171,8 +199,8 @@
   (hashCode [this] (.hashCode m))
   (toString [this] (.toString m))
   Callable
-  (call [this] (throw (ArityException. 0 "IndexedPersistentMap")))
+  (call [this] (.call ^Callable m))
   Runnable
-  (run [this] (throw (ArityException. 0 "IndexedPersistentMap")))
+  (run [this] (.run ^Runnable m))
   IKVReduce
   (kvreduce [this f init] (reduce-kv f init m)))

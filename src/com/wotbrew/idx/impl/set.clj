@@ -73,12 +73,44 @@
   IMeta
   (meta [this] (.meta ^IMeta s))
   Collection
+  ;; plain persistent collections are Serializable; without this marker
+  ;; ObjectOutputStream refuses the wrapper where it accepts the plain coll
+  java.io.Serializable
   IHashEq
   (hasheq [this] (.hasheq ^IHashEq s))
   IFn
-  (invoke [this arg1] (.invoke ^IFn s arg1))
-  (invoke [this arg1 arg2] (.invoke ^IFn s arg1 arg2))
+  ;; every arity delegates to the backing collection — including the wrong ones
+  ;; — because deftype leaves unimplemented interface methods abstract, and an
+  ;; AbstractMethodError is an Error (uncatchable via `catch Exception`) whereas
+  ;; the plain collection throws ArityException, with a message naming the
+  ;; backing class rather than this wrapper
+  (invoke [this] (.invoke ^IFn s))
+  (invoke [this a1] (.invoke ^IFn s a1))
+  (invoke [this a1 a2] (.invoke ^IFn s a1 a2))
+  (invoke [this a1 a2 a3] (.invoke ^IFn s a1 a2 a3))
+  (invoke [this a1 a2 a3 a4] (.invoke ^IFn s a1 a2 a3 a4))
+  (invoke [this a1 a2 a3 a4 a5] (.invoke ^IFn s a1 a2 a3 a4 a5))
+  (invoke [this a1 a2 a3 a4 a5 a6] (.invoke ^IFn s a1 a2 a3 a4 a5 a6))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7] (.invoke ^IFn s a1 a2 a3 a4 a5 a6 a7))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8] (.invoke ^IFn s a1 a2 a3 a4 a5 a6 a7 a8))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9] (.invoke ^IFn s a1 a2 a3 a4 a5 a6 a7 a8 a9))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10] (.invoke ^IFn s a1 a2 a3 a4 a5 a6 a7 a8 a9 a10))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11] (.invoke ^IFn s a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12] (.invoke ^IFn s a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13] (.invoke ^IFn s a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14] (.invoke ^IFn s a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15] (.invoke ^IFn s a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16] (.invoke ^IFn s a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17] (.invoke ^IFn s a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17 a18] (.invoke ^IFn s a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17 a18))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17 a18 a19] (.invoke ^IFn s a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17 a18 a19))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17 a18 a19 a20] (.invoke ^IFn s a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17 a18 a19 a20))
+  (invoke [this a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17 a18 a19 a20 rest] (.invoke ^IFn s a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17 a18 a19 a20 rest))
   (applyTo [this arglist] (apply s arglist))
+  Callable
+  (call [this] (.call ^Callable s))
+  Runnable
+  (run [this] (.run ^Runnable s))
   Set
   (size [this] (.size ^Set s))
   (isEmpty [this] (.isEmpty ^Set s))
@@ -97,12 +129,17 @@
     (let [ns (.disjoin ^IPersistentSet s key)]
       (if (identical? ns s)
         this
-        (IndexedPersistentSet.
-          ns
-          (some-> eq (i/del-eq key key))
-          (some-> uniq (i/del-uniq key))
-          (some-> sorted (i/del-sorted key key))
-          auto))))
+        ;; delete from the indexes using the STORED member, not the caller's
+        ;; key: they are = but can yield different property values (metadata- or
+        ;; type-based properties), and the indexes are keyed by what was stored.
+        ;; The vector/map impls resolve the stored element the same way.
+        (let [old-element (.get ^IPersistentSet s key)]
+          (IndexedPersistentSet.
+            ns
+            (some-> eq (i/del-eq old-element old-element))
+            (some-> uniq (i/del-uniq old-element))
+            (some-> sorted (i/del-sorted old-element old-element))
+            auto)))))
   (contains [this key] (.contains ^IPersistentSet s key))
   (get [this key] (.get ^IPersistentSet s key))
   Seqable

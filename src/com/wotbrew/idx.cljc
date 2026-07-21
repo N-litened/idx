@@ -12,6 +12,7 @@
   Indexes once realised will be maintained incrementally as you call conj, assoc and so on on the collection.
 
   The coll must be a vector, map or set. If you pass a seq/seqable/iterable it is converted to a vector.
+  Sorted maps/sets are not supported and will throw (the wrapper could not support subseq/rseq/sorted?).
 
   Metadata is carried over to the new structure.
 
@@ -25,10 +26,27 @@
   [coll]
   (p/-unwrap coll))
 
+(defn- predicate?
+  "Is x a Predicate (a (match ...)/(pred ...) form) rather than plain data?
+
+  On the JVM this deliberately tests the protocol's backing interface with
+  `instance?` instead of `satisfies?`. This check sits on the hot path of every
+  query with an almost-always-negative answer, and on Clojure 1.10 `satisfies?`
+  caches no negative results — it reflectively walks the class hierarchy on
+  every miss, costing microseconds where `instance?` costs nanoseconds.
+  The trade-off: JVM Predicate implementations must implement the protocol
+  inline (deftype/defrecord/reify); `extend`-based implementations will not be
+  recognised. The protocol is documented as an implementation detail, so this
+  is acceptable. CLJS `satisfies?` compiles to a cheap field check and has no
+  such problem, hence the split."
+  [x]
+  #?(:clj  (instance? com.wotbrew.idx.impl.protocols.Predicate x)
+     :cljs (satisfies? p/Predicate x)))
+
 (defn- as-property
   "Predicates (such as those returned by match/pred) are indexed on their underlying property."
   [p]
-  (if (satisfies? p/Predicate p) (p/-prop p) p))
+  (if (predicate? p) (p/-prop p) p))
 
 (defn index
   "Adds indexes to the collection, returning a new indexed collection.
@@ -40,6 +58,7 @@
   `:idx/sort` (for ascending/descending calls)
 
   The coll must be a vector, map or set. If you pass a seq/seqable/iterable it is converted to a vector.
+  Sorted maps/sets are not supported and will throw (the wrapper could not support subseq/rseq/sorted?).
 
   Metadata is carried over to the new structure.
 
@@ -47,6 +66,8 @@
   ([coll] coll)
   ([coll p kind] (p/-add-index coll (as-property p) kind))
   ([coll p kind & more]
+   (when (odd? (count more))
+     (throw (ex-info "index requires property/kind pairs" {:unpaired-property (last more)})))
    (loop [coll (p/-add-index coll (as-property p) kind)
           more more]
      (if-some [[p kind & more] (seq more)]
@@ -57,6 +78,8 @@
   "Deletes indexes from the collection, returning a new collection."
   ([coll p kind] (p/-del-index coll (as-property p) kind))
   ([coll p kind & more]
+   (when (odd? (count more))
+     (throw (ex-info "delete-index requires property/kind pairs" {:unpaired-property (last more)})))
    (loop [coll (p/-del-index coll (as-property p) kind)
           more more]
      (if-some [[p kind & more] (seq more)]
@@ -91,12 +114,12 @@
 
 (defn- build-match-map
   [m p v]
-  (if (satisfies? p/Predicate v)
+  (if (predicate? v)
     (build-match-map m (pcomp (p/-prop v) p) (p/-predv v))
     (assoc m p v)))
 
 (defn match
-  "Takes a map of {property value-or-predicate} and returns a predicate.
+  "Takes interleaved property/value-or-predicate pairs and returns a predicate.
 
   You can then use it in short-form lookup/identify calls.
 
@@ -166,20 +189,24 @@
   The 2-ary takes a 'predicate' which composes a property with its expected value, either a `(match)` form, or a `(pred)` form."
   ([coll pred] (lookup coll (p/-prop pred) (p/-predv pred)))
   ([coll p v]
-   (if (satisfies? p/Predicate v)
+   (if (predicate? v)
      (lookup coll (pcomp (p/-prop v) p) (p/-predv v))
      (if-some [i (p/-get-eq coll p)]
-       (let [m (i v {})] (vals m))
+       ;; (vals {}) is nil; return [] so a miss looks the same whether or not
+       ;; the property happens to be indexed (the scan path returns a filterv)
+       (let [m (i v {})] (or (vals m) []))
        (filterv (fn [element] (= v (p/-property p element))) (p/-elements coll))))))
 
 (defn lookup-keys
   "Like lookup, but returns the indexes or keys of the matching elements."
   ([coll pred] (lookup-keys coll (p/-prop pred) (p/-predv pred)))
   ([coll p v]
-   (if (satisfies? p/Predicate v)
+   (if (predicate? v)
      (lookup-keys coll (pcomp (p/-prop v) p) (p/-predv v))
      (if-some [i (p/-get-eq coll p)]
-       (let [m (i v {})] (keys m))
+       ;; (keys {}) is nil; return () so a miss looks the same whether or not
+       ;; the property happens to be indexed (the scan path returns a seq)
+       (let [m (i v {})] (or (keys m) ()))
        (map first (filter (fn [[_ element]] (= v (p/-property p element))) (p/-id-element-pairs coll)))))))
 
 (defn identify
@@ -188,7 +215,7 @@
   Behaviour is undefined if (p element) does not return a unique value across the collection."
   ([coll pred] (identify coll (p/-prop pred) (p/-predv pred)))
   ([coll p v]
-   (if (satisfies? p/Predicate v)
+   (if (predicate? v)
      (identify coll (pcomp (p/-prop v) p) (p/-predv v))
      (if-some [i (p/-get-uniq coll p)]
        ;; find (rather than get) so ids that are themselves nil (e.g. nil map keys) still resolve
@@ -197,10 +224,14 @@
        (reduce (fn [_ element] (when (= v (p/-property p element)) (reduced element))) nil (p/-elements coll))))))
 
 (defn pk
-  "Returns the key (index/map key) given a unique property/value pair or predicate."
+  "Returns the key (index/map key) given a unique property/value pair or predicate.
+
+  Returns nil when nothing matches. Note this is ambiguous when the matching
+  element's key is itself nil (e.g. a nil map key) — use identify if you need
+  to distinguish those cases."
   ([coll pred] (pk coll (p/-prop pred) (p/-predv pred)))
   ([coll p v]
-   (if (satisfies? p/Predicate v)
+   (if (predicate? v)
      (pk coll (pcomp (p/-prop v) p) (p/-predv v))
      (if-some [i (p/-get-uniq coll p)]
        (i v)
@@ -219,7 +250,7 @@
   Behaviour is undefined if (p element) does not return a unique value across the collection."
   ([coll pred element] (replace-by coll (p/-prop pred) (p/-predv pred) element))
   ([coll p v element]
-   (if (satisfies? p/Predicate v)
+   (if (predicate? v)
      (replace-by coll (pcomp (p/-prop v) p) (p/-predv v) element)
      (let [replace1 (fn [id]
                       (if (associative? coll)

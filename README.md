@@ -41,6 +41,12 @@ lein `[com.wotbrew/idx "0.1.3"]` or deps `com.wotbrew/idx {:mvn/version "0.1.3"}
 - If you index by function, that function must absolutely be pure, otherwise all bets are off. Similar to comparators and (sorted-set-by).
 - Each index uses memory, so we need to make sure we consider that. This is particularly important to think about when using automatic-indexing.
 - When indexing by function, index identity is function identity - so you must be careful with lambdas and closures.
+- Sorted maps and sets cannot be wrapped: the wrapper cannot offer `subseq`/`rseq`/`sorted?`, so rather than silently
+  breaking those, `auto`/`index` throw when given one. Wrap a hash-based collection instead (a `:idx/sort` index can often
+  replace the sorted collection itself).
+- Indexed collections do not support `transient`. This is deliberate: a transient view could not maintain the indexes, and
+  handing back the bare backing collection would make functions like `into` (which prefer transients) silently drop your
+  indexes. `into` an indexed collection works fine — it takes the `conj` path and keeps indexes fresh.
 
 ## Why 
 
@@ -212,7 +218,7 @@ a couple of properties together for composite keys.
 ```clojure
 (lookup orders (match (path :user :id) 32444,
                       :carrier (match :country "uk" :available true)
-                      :delivery-date #"2020-08-17"))
+                      :delivery-date "2020-08-17"))
 ```
 
 In order to index a match, either use an `auto` coll or use the `:idx/value` placeholder.

@@ -368,6 +368,171 @@
       (is (= ["Alice" "Jim"] (mapv :name (ascending u :age > 30))))
       (is (= ["Bob" "Barbara"] (mapv :name (descending u :age <= 30)))))))
 
+(deftest set-disj-stale-copy-test
+  ;; disj must clean indexes using the STORED member, not the argument: the two
+  ;; are = but can yield different property values (here, metadata-based)
+  (let [tagp (fn [x] (:t (meta x)))
+        s (index #{(with-meta [1] {:t :a})} tagp :idx/hash tagp :idx/sort)
+        s2 (disj s [1])]
+    (is (= 0 (count s2)))
+    (is (empty? (lookup s2 tagp :a)))
+    (is (empty? (ascending s2 tagp >= :a)))))
+
+(deftest set-disj-absent-element-test
+  ;; disjoining an element NOT in the set must not touch the indexes, even when
+  ;; its property values collide with a present member (cljs sets always
+  ;; allocate on disj, so this exercised a broken identity-based guard)
+  (let [s (index #{{:id 1 :v :x} {:id 2 :v :y}} :id :idx/unique)
+        s2 (disj s {:id 2 :v :different})]
+    (is (= s s2))
+    (is (= {:id 2 :v :y} (identify s2 :id 2)))))
+
+(deftest set-conj-existing-member-test
+  ;; conj of an = element keeps the stored member (like plain sets); indexes
+  ;; must not be re-run against the new, property-divergent object
+  (let [tagp (fn [x] (:t (meta x)))
+        s (index #{(with-meta [1] {:t :a})} tagp :idx/hash)
+        s2 (conj s (with-meta [1] {:t :c}))]
+    (is (= 1 (count s2)))
+    (is (= [[1]] (vec (lookup s2 tagp :a))))
+    (is (empty? (lookup s2 tagp :c)))))
+
+(deftest reduce-parity-test
+  (is (= 6 (reduce + (auto [1 2 3]))))
+  (is (= 0 (reduce + (auto []))))
+  (is (= 6 (reduce + 0 (auto [1 2 3]))))
+  (is (= 6 (reduce + (auto #{1 2 3}))))
+  (let [m (zipmap (range 20) (range 20))
+        f (fn [a [_ v]] (+ a v))]
+    ;; over 8 entries the backing map is a hash map, which lacks IReduce in cljs
+    (is (= (reduce f 0 m) (reduce f 0 (auto m))))))
+
+(deftest lookup-miss-consistency-test
+  ;; a miss returns an empty coll whether or not the property is indexed
+  (let [plain [{:id 1}]
+        indexed (index plain :id :idx/hash)]
+    (is (= [] (lookup plain :id 99)))
+    (is (= [] (lookup indexed :id 99)))
+    (is (= () (lookup-keys plain :id 99)))
+    (is (= () (lookup-keys indexed :id 99)))))
+
+(deftest index-unpaired-args-test
+  (is (thrown? #?(:clj clojure.lang.ExceptionInfo :cljs js/Error)
+               (index [{:a 1}] :a :idx/hash :b)))
+  (is (thrown? #?(:clj clojure.lang.ExceptionInfo :cljs js/Error)
+               (delete-index (index [{:a 1}] :a :idx/hash) :a :idx/hash :b))))
+
+(deftest sorted-collections-rejected-test
+  ;; wrapping would silently break subseq/rseq/sorted?, so it must fail loudly
+  (is (thrown? #?(:clj Exception :cljs js/Error) (auto (sorted-map 1 :a))))
+  (is (thrown? #?(:clj Exception :cljs js/Error) (auto (sorted-map-by > 1 :a))))
+  (is (thrown? #?(:clj Exception :cljs js/Error) (index (sorted-set 1 2) identity :idx/hash))))
+
+(defn age-prop [x] (:age x))
+
+(defmulti age-multi (fn [_] :default))
+(defmethod age-multi :default [x] (:age x))
+
+(deftest invocable-property-test
+  ;; vars, meta-decorated fns and multimethods must all be invoked as
+  ;; properties (not looked up as keys) on both platforms
+  (let [coll [{:age 1} {:age 2}]]
+    (doseq [c [coll (auto coll)]]
+      (is (= [{:age 1}] (vec (lookup c #'age-prop 1))))
+      (is (= [{:age 1}] (vec (lookup c age-multi 1))))
+      (is (= [{:age 1}] (vec (lookup c (with-meta (fn [x] (:age x)) {:doc "d"}) 1)))))))
+
+(defrecord WrapRec [a b])
+
+(deftest record-wrap-test
+  ;; records wrap as indexed maps on both platforms
+  (let [r (auto (->WrapRec 1 2))]
+    (is (map? r))
+    (is (= (->WrapRec 1 2) (unwrap r)))
+    (is (= [1] (vec (lookup r identity 1))))))
+
+(deftest with-meta-preserves-indexes-test
+  (let [v (index [{:foo 1}] :foo :idx/hash)
+        v2 (vary-meta v assoc :m 1)]
+    (is (= {:m 1} (meta v2)))
+    (is (some? (p/-get-eq v2 :foo)))
+    (is (= [{:foo 1}] (vec (lookup v2 :foo 1))))
+    (let [v3 (conj v2 {:foo 2})]
+      (is (= [{:foo 2}] (vec (lookup v3 :foo 2)))))))
+
+(deftest misc-collection-op-parity-test
+  (let [v (auto [1 2 3])]
+    (is (= [3 2 1] (vec (rseq v))))
+    (is (= (reduce-kv (fn [a i x] (+ a i x)) 0 [1 2 3])
+           (reduce-kv (fn [a i x] (+ a i x)) 0 v)))
+    (is (= [1 2 3] (sort (auto [3 1 2]))))
+    #?(:clj (is (= [2 3] (subvec v 1))))))
+
+#?(:cljs
+   (deftest fractional-assoc-key-test
+     ;; host cljs vectors truncate fractional keys to an integer slot; the
+     ;; index id must be that effective slot or indexes hold stale entries
+     (let [v (index [{:a 1} {:a 2} {:a 3}] :a :idx/hash :a :idx/unique)
+           v2 (assoc v 1.5 {:a 99})]
+       (is (= [{:a 1} {:a 99} {:a 3}] (unwrap v2)))
+       (is (empty? (lookup v2 :a 2)))
+       (is (= [{:a 99}] (vec (lookup v2 :a 99))))
+       (is (= 1 (pk v2 :a 99))))))
+
+#?(:cljs
+   (deftest cljs-vector-assoc-oob-error-parity-test
+     (let [msg (fn [coll] (try (assoc coll 5 :x) nil (catch js/Error e (.-message e))))]
+       (is (some? (msg [1 2 3])))
+       (is (= (msg [1 2 3]) (msg (auto [1 2 3])))))))
+
+#?(:cljs
+   (deftest cljs-vector-invoke-parity-test
+     ;; arity-1 invoke goes through -nth like the host vector: throws on a bad
+     ;; index rather than returning nil
+     (is (= 2 ((auto [1 2 3]) 1)))
+     (is (thrown? js/Error ((auto [1 2 3]) 5)))
+     (is (= :nf ((auto [1 2 3]) 5 :nf)))))
+
+#?(:clj
+   (deftest ifn-arity-parity-test
+     ;; wrong arities throw ArityException with the same message as the plain
+     ;; collection, not AbstractMethodError (an Error, which escapes
+     ;; (catch Exception ...))
+     (let [msg (fn [thunk] (try (thunk) nil (catch clojure.lang.ArityException e (.getMessage e))))]
+       (doseq [[w p] [[(auto [1 2 3]) [1 2 3]]
+                      [(auto {:a 1}) {:a 1}]
+                      [(auto #{1}) #{1}]]]
+         (is (some? (msg #(w))))
+         (is (= (msg #(p)) (msg #(w))))
+         (is (= (msg #(p 1 2 3)) (msg #(w 1 2 3))))
+         (is (= (msg #(.call ^java.util.concurrent.Callable p))
+                (msg #(.call ^java.util.concurrent.Callable w))))))))
+
+#?(:clj
+   (deftest serializable-test
+     (let [round-trip (fn [x]
+                        (let [bos (java.io.ByteArrayOutputStream.)]
+                          (with-open [oos (java.io.ObjectOutputStream. bos)]
+                            (.writeObject oos x))
+                          (with-open [ois (java.io.ObjectInputStream.
+                                            (java.io.ByteArrayInputStream. (.toByteArray bos)))]
+                            (.readObject ois))))]
+       (doseq [coll [(auto [1 2 3]) (auto {:a 1}) (auto #{1 2})
+                     (index [{:id 1}] :id :idx/unique)]]
+         (is (= coll (round-trip coll)))))))
+
+#?(:clj
+   (deftest no-transient-support-test
+     ;; deliberately NOT IEditableCollection: a transient view could not
+     ;; maintain the indexes, and delegating to the backing collection would
+     ;; make `into` (which prefers transients) silently return a plain
+     ;; collection, dropping the wrapper and its indexes. Keeping the wrapper
+     ;; out of IEditableCollection forces `into` down the conj path, which
+     ;; maintains indexes.
+     (is (not (instance? clojure.lang.IEditableCollection (auto [1]))))
+     (let [v (into (index [{:id 1}] :id :idx/unique) [{:id 2}])]
+       (is (= {:id 2} (identify v :id 2))))))
+
 ;; properties
 
 (def index-pair
