@@ -12,6 +12,7 @@
 (defprotocol Idx
   "You should consider this protocol an implementation detail for now."
   (-rewrap [idx auto])
+  (-manual? [idx])
   (-get-eq [idx p])
   (-get-uniq [idx p])
   (-get-sort [idx p])

@@ -12,6 +12,7 @@
    ^boolean auto]
   p/Idx
   (-rewrap [idx a] (IndexedPersistentMap. m eq uniq sorted a))
+  (-manual? [idx] (not auto))
   (-get-eq [idx p]
     (or (get eq p)
         (when auto

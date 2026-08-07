@@ -12,6 +12,7 @@
    ^boolean auto]
   p/Idx
   (-rewrap [idx a] (IndexedPersistentSet. s eq uniq sorted a))
+  (-manual? [idx] (not auto))
   (-get-eq [idx p]
     (or (get eq p)
         (when auto

@@ -8,6 +8,7 @@
   p/Idx
   nil
   (-rewrap [coll auto] nil)
+  (-manual? [coll] false)
   (-get-eq [coll p] nil)
   (-get-uniq [coll p] nil)
   (-get-sort [coll p] nil)
@@ -17,6 +18,7 @@
   (-id-element-pairs [coll] nil)
   default
   (-rewrap [coll auto] coll)
+  (-manual? [coll] false)
   (-get-eq [coll p] nil)
   (-get-uniq [coll p] nil)
   (-get-sort [coll p] nil)

@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Added `tuple`, a property composing several properties into a comparable vector for ordered composite indexes. Unlike a
+  function such as `(juxt :a :b)` it is a value, so an index created with one tuple is found by another built the same
+  way; unlike `match` it extracts a vector rather than a map, so it can back an `:idx/sort` index. Composite indexes
+  previously had to be keyed by a hand-rolled function whose identity had to be preserved by the caller — a shared or
+  memoised instance — or the index became unreachable while still being maintained on every write.
+- **Breaking**: a manually indexed collection now throws when asked a query no index can answer quickly, instead of
+  silently falling back to a scan. `auto` collections (which realise the index) and plain unwrapped collections (which
+  never claimed one) are unaffected. The silent fallback hid an index deleted, a property misspelled, or a function
+  property whose identity did not survive being rebuilt; `ascending`'s fallback in particular rebuilt a whole sorted map
+  on every call rather than merely scanning. Callers who want a scan should use a plain collection or `auto`.
+- `lookup`/`lookup-keys` are now served by an `:idx/sort` index when no `:idx/hash` index exists, by seeking to the value
+  in the sorted index. A collection indexed for range queries no longer needs a second hash index to be looked up by
+  value, and such a lookup is no longer refused.
+- Added 2-ary `ascending`/`descending`, returning the whole index in order rather than a range of it. A full ordered scan
+  previously had to be spelled as two half-ranges to avoid inventing an infinite sentinel value.
+
 - Fixed concurrent JVM queries auto-realising indexes for different properties losing one cache entry through an unsynchronised read/modify/write. This became a correctness bug once auto-realised unique indexes started enforcing later modifications: a lost declaration allowed duplicates. Cache publication now merges under the wrapper lock and uses volatile fields for visibility.
 - Deleting the last index of a kind now resets its outer maintenance map to `nil`; leaving `{}` behind made every later modification call an empty maintenance reducer, retaining substantial overhead after `delete-index`.
 - **Breaking**: `:idx/unique` now enforces uniqueness. Building the index throws if the property is not unique across the collection, and any modification that would introduce a duplicate indexed value throws an `ex-info` naming the property, value and both ids (updating the element that owns a value remains fine). This applies to auto-realised unique indexes too: `identify`/`pk`/`replace-by` on an `auto` collection declare the queried property unique. Plain (unwrapped) collections are unaffected — linear scan, first match. Previously duplicates were silently accepted (last-write-wins) and could permanently corrupt the index when either duplicate was later modified.

@@ -123,6 +123,30 @@
   (-property [this element]
     (reduce (fn [m p] (assoc m p (p/-property p element))) {} ps)))
 
+(defrecord Tuple [ps]
+  p/Property
+  (-property [this element] (mapv (fn [p] (p/-property p element)) ps)))
+
+(defn tuple
+  "A property extracting several properties as a vector, for composite indexes.
+
+  Unlike a hand-rolled function such as `(juxt :a :b)`, a tuple is a value: two
+  tuples over the same properties are `=`, so one built anywhere addresses an
+  index created by another. Indexing by function makes index identity *function*
+  identity, and every function-constructing combinator allocates, so a memoised
+  or otherwise shared instance is the only thing that keeps such an index
+  reachable — a fragile invariant to maintain by hand.
+
+  Unlike `match`, a tuple extracts a vector rather than a map, so its values are
+  mutually comparable and it can back an `:idx/sort` index. Vectors compare
+  element-wise and `nil` sorts first, which is what lets a component that is an
+  absent optional key participate in the order.
+
+  Every element must yield the same number of components for the values to be
+  mutually comparable, which holds whenever one tuple indexes a collection."
+  [& ps]
+  (->Tuple (vec ps)))
+
 (defrecord Pred [p v]
   p/Predicate
   (-prop [this] p)
@@ -211,6 +235,25 @@
   ([p1 p2 p3] (->Path3 p1 p2 p3))
   ([p1 p2 p3 p4 & more] (->Path (reduce conj [p1 p2 p3 p4] more))))
 
+(defn- unindexed!
+  "Refuses a query a manually indexed collection cannot answer quickly.
+
+  Declaring indexes with `index` is a statement about which questions the
+  collection is prepared to answer. Silently scanning for the others hides the
+  mistakes that matter most: an index deleted, a property misspelled, or — the
+  reason this exists — a function property whose identity did not survive being
+  rebuilt, leaving an index that is maintained on every write and reachable by
+  nothing. `ascending` is the worst of these, because its fallback rebuilds a
+  whole sorted map per call rather than merely scanning.
+
+  An `auto` collection realises the index instead, and a plain collection never
+  claimed to have one, so neither is refused."
+  [coll p kinds]
+  (when (p/-manual? coll)
+    (throw (ex-info (str "No index on this collection can answer for this property. "
+                         "Add one with `index`, or use `auto`.")
+                    {:property p :usable-kinds kinds}))))
+
 (defn lookup
   "Returns a seq of items where (p element) equals v.
 
@@ -232,7 +275,14 @@
          ;; (vals {}) is nil; return [] so a miss looks the same whether or not
          ;; the property happens to be indexed (the scan path returns a filterv)
          (let [m (i v {})] (or (vals m) []))
-         (filterv (fn [element] (= v (p/-property p element))) (p/-elements coll)))))))
+         ;; A sorted index answers an equality query too — seek to the value and
+         ;; take what sits there — so a collection indexed for range queries need
+         ;; not also carry a hash one to be looked up by value.
+         (if-some [i (p/-get-sort coll p)]
+           (or (vals (get i v)) [])
+           (do
+             (unindexed! coll p [:idx/hash :idx/sort])
+             (filterv (fn [element] (= v (p/-property p element))) (p/-elements coll)))))))))
 
 (defn lookup-keys
   "Like lookup, but returns the indexes or keys of the matching elements."
@@ -245,7 +295,12 @@
          ;; (keys {}) is nil; return () so a miss looks the same whether or not
          ;; the property happens to be indexed (the scan path returns a seq)
          (let [m (i v {})] (or (keys m) ()))
-         (map first (filter (fn [[_ element]] (= v (p/-property p element))) (p/-id-element-pairs coll))))))))
+         (if-some [i (p/-get-sort coll p)]
+           (or (keys (get i v)) ())
+           (do
+             (unindexed! coll p [:idx/hash :idx/sort])
+             (map first (filter (fn [[_ element]] (= v (p/-property p element)))
+                                (p/-id-element-pairs coll))))))))))
 
 (defn identify
   "Returns the element where the property equals v.
@@ -264,7 +319,8 @@
          ;; find (rather than get) so ids that are themselves nil (e.g. nil map keys) still resolve
          (when-some [kv (find i v)]
            (coll (val kv)))
-         (reduce (fn [_ element] (when (= v (p/-property p element)) (reduced element))) nil (p/-elements coll)))))))
+         (do (unindexed! coll p [:idx/unique])
+             (reduce (fn [_ element] (when (= v (p/-property p element)) (reduced element))) nil (p/-elements coll))))))))
 
 (defn pk
   "Returns the key (index/map key) given a unique property/value pair or predicate.
@@ -282,7 +338,8 @@
        (pk coll (pcomp (p/-prop v) p) (p/-predv v))
        (if-some [i (p/-get-uniq coll p)]
          (i v)
-         (reduce (fn [_ [id element]] (when (= v (p/-property p element)) (reduced id))) nil (p/-id-element-pairs coll)))))))
+         (do (unindexed! coll p [:idx/unique])
+             (reduce (fn [_ [id element]] (when (= v (p/-property p element)) (reduced id))) nil (p/-id-element-pairs coll))))))))
 
 (defn replace-by
   "Replaces an element selected by an alternative key.
@@ -315,7 +372,8 @@
            (if-some [kv (find i v)]
              (replace1 (val kv))
              coll)
-           (let [[found? id]
+           (let [_ (unindexed! coll p [:idx/unique])
+                 [found? id]
                  (reduce (fn [acc [id element]]
                            (if (= v (p/-property p element))
                              (reduced [true id])
@@ -323,6 +381,14 @@
                          [false nil]
                          (p/-id-element-pairs coll))]
              (if found? (replace1 id) coll))))))))
+
+(defn- sorted-index
+  "The sorted index ordering a property, or a throwaway one built from the
+  elements when the collection never declared it and is entitled to scan."
+  [coll p]
+  (or (p/-get-sort coll p)
+      (do (unindexed! coll p [:idx/sort])
+          (i/create-sorted-from-elements coll p))))
 
 (defn ascending
   "Returns an ascending order seq of elements where (test (p element) v) returns true.
@@ -333,13 +399,18 @@
   On an auto collection this query realises (and caches) a sort index, subjecting
   future modifications to the same comparability requirement (see `auto`).
 
+  The 2-ary returns every element in ascending order of the property, which is
+  the whole of the index rather than a range of it.
+
   This is much like subseq in clojure.core."
-  [coll p test v]
-  (let [p (as-property p)
-        i (or (p/-get-sort coll p)
-              (i/create-sorted-from-elements coll p))]
-    (->> (subseq i test v)
-         (mapcat (fn [e] (vals (val e)))))))
+  ([coll p]
+   (let [p (as-property p)]
+     (->> (sorted-index coll p)
+          (mapcat (fn [e] (vals (val e)))))))
+  ([coll p test v]
+   (let [p (as-property p)]
+     (->> (subseq (sorted-index coll p) test v)
+          (mapcat (fn [e] (vals (val e))))))))
 
 (defn descending
   "Returns a descending order seq of elements where (test (p element) v) returns true.
@@ -350,10 +421,15 @@
   On an auto collection this query realises (and caches) a sort index, subjecting
   future modifications to the same comparability requirement (see `auto`).
 
+  The 2-ary returns every element in descending order of the property, which is
+  the whole of the index rather than a range of it.
+
   This is much like rsubseq in clojure.core."
-  [coll p test v]
-  (let [p (as-property p)
-        i (or (p/-get-sort coll p)
-              (i/create-sorted-from-elements coll p))]
-    (->> (rsubseq i test v)
-         (mapcat (fn [e] (vals (val e)))))))
+  ([coll p]
+   (let [p (as-property p)]
+     (->> (rseq (sorted-index coll p))
+          (mapcat (fn [e] (vals (val e)))))))
+  ([coll p test v]
+   (let [p (as-property p)]
+     (->> (rsubseq (sorted-index coll p) test v)
+          (mapcat (fn [e] (vals (val e))))))))

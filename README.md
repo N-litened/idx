@@ -32,6 +32,7 @@ lein `[com.wotbrew/idx "0.1.3"]` or deps `com.wotbrew/idx {:mvn/version "0.1.3"}
 - Indexes are maintained incrementally as you modify your collection with functions - `conj`, `assoc` and so on.
 - Supports composite, nested, unique and sorted indexes.
 - Query functions also work on normal collections so you can 'upgrade' them with indexes when you profile and find where you need them.
+- A manually indexed collection **refuses** a query no index can answer quickly, rather than silently scanning. See [strictness](#a-manual-collection-refuses-what-it-cannot-answer).
 - Good for re-frame, add indexes without changing the shape of your data.
 
 ## Caveats
@@ -40,7 +41,9 @@ lein `[com.wotbrew/idx "0.1.3"]` or deps `com.wotbrew/idx {:mvn/version "0.1.3"}
 - For small n indexes are very expensive. Use it to flatten quadratic joins, do not use it to replace all sequence filtering.
 - If you index by function, that function must absolutely be pure, otherwise all bets are off. Similar to comparators and (sorted-set-by).
 - Each index uses memory, so we need to make sure we consider that. This is particularly important to think about when using automatic-indexing.
-- When indexing by function, index identity is function identity - so you must be careful with lambdas and closures.
+- When indexing by function, index identity is function identity - so you must be careful with lambdas and closures. Prefer
+  [`tuple`](#tuple) for composite keys and [`path`](#path) for nested ones: both are values, so an index created with one
+  is found by another built the same way.
 - Sorted maps and sets cannot be wrapped: the wrapper cannot offer `subseq`/`rseq`/`sorted?`, so rather than silently
   breaking those, `auto`/`index` throw when given one. Wrap a hash-based collection instead (a `:idx/sort` index can often
   replace the sorted collection itself).
@@ -215,6 +218,15 @@ Uses a one-to-many sorted index if available.
 ({:name "Bob", :age 30}, {:name "Barbara", :age 12})
 ```
 
+The 2-ary returns the whole index in order rather than a range of it, so a full ordered scan does not have to be spelled
+as two half-ranges around an invented sentinel value.
+
+```clojure
+(ascending users :age)
+;; =>
+({:name "Barbara", :age 12}, {:name "Bob", :age 30}, {:name "Alice", :age 42}, {:name "Jim", :age 83})
+```
+
 #### `path`
 
 `path` allows nested indexes, use it for nested indexes as if you
@@ -280,6 +292,22 @@ Uses a unique one-to-one hash index if one is available.
 (pk [{:foo 42}, {:foo 33}] :foo 42) ;; => 0
 ```
 
+#### `tuple`
+
+`tuple` composes properties into a **comparable** composite key, for ordered composite indexes.
+
+```clojure
+(index orders (tuple :customer :placed-at) :idx/sort)
+(ascending orders (tuple :customer :placed-at) >= [42 #inst "2026-01-01"])
+```
+
+Unlike a function such as `(juxt :customer :placed-at)`, a tuple is a value — two tuples over the same properties are
+`=`, so one built anywhere addresses an index created by another. Unlike `match`, it extracts a vector rather than a map,
+so its values are mutually comparable and can back an `:idx/sort` index. Vectors compare element-wise and `nil` sorts
+first, so a component that is an absent key still participates in the order.
+
+Components can be any property, including `path` and `pcomp`.
+
 #### `pcomp`
 
 `pcomp` allows for function style composition of properties, takes 2 properties and returns a property.
@@ -330,6 +358,32 @@ Returns a new collection without the specified index(es), uses same index specif
 ```
 
 ## Reference
+
+### A manual collection refuses what it cannot answer
+
+Declaring indexes with `index` states which questions a collection is prepared to answer. Asking it a different one
+throws rather than quietly scanning:
+
+```clojure
+(def orders (index all-orders :customer :idx/sort))
+
+(ascending orders :customer >= 42)   ;; served by the index
+(lookup orders :customer 42)         ;; also served by it — see below
+(lookup orders :status :shipped)     ;; throws: no index can answer this
+```
+
+This is deliberate. A silent fallback hides exactly the mistakes that matter — an index deleted, a property misspelled,
+or a function property whose identity did not survive being rebuilt, leaving an index maintained on every write and
+reachable by nothing. `ascending` is the worst of them, because its fallback rebuilds a whole sorted map on *every call*
+rather than merely scanning.
+
+Two kinds of collection are never refused:
+
+- an `auto` collection realises the index it needs instead;
+- a plain, unwrapped collection never claimed to have an index, so scanning is its contract.
+
+An `:idx/sort` index also answers equality queries (`lookup`, `lookup-keys`): the query seeks to the value and takes what
+sits there. So a collection indexed for range queries does not need a second hash index to be looked up by value.
 
 ### Properties 
 

@@ -1,7 +1,7 @@
 (ns com.wotbrew.idx-test
   (:require [clojure.test :refer [deftest is]]
             [com.wotbrew.idx :refer [lookup lookup-keys unwrap auto identify pred match index delete-index path
-                                     replace-by as-key ascending descending pk pcomp]]
+                                     replace-by as-key ascending descending pk pcomp tuple]]
             [com.wotbrew.idx.impl.protocols :as p]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
@@ -216,7 +216,9 @@
     ;; the index is actually created & used (no auto, so -get-eq must find a manual index)
     (is (some? (p/-get-eq v (p/-prop (match :foo 1 :bar 2)))))
     (is (= [{:foo 1 :bar 2}] (vec (lookup v (match :foo 1 :bar 2)))))
-    (is (= #{{:foo 1 :bar 1} {:foo 1 :bar 2}} (set (lookup v (match :foo 1)))))
+    ;; the composite index cannot answer for :foo alone, and says so
+    (is (thrown? #?(:clj clojure.lang.ExceptionInfo :cljs js/Error)
+                 (set (lookup v (match :foo 1)))))
     (is (empty? (lookup v (match :foo 2 :bar 2)))))
   ;; a single-property match shares the plain property index
   (let [v (index [{:foo 1} {:foo 2}] (match :foo :idx/value) :idx/hash)]
@@ -267,9 +269,9 @@
 (deftest replace-by-sentinel-id-test
   (let [sentinel :com.wotbrew.idx/not-found]
     (doseq [m [{sentinel {:id 1}}
-               (index {sentinel {:id 1}} :other :idx/hash)]]
+               (index {sentinel {:id 1}} :id :idx/unique)]]
       (is (= {sentinel {:id 2}} (replace-by m :id 1 {:id 2}))))
-    (doseq [s [#{sentinel} (index #{sentinel} hash :idx/hash)]]
+    (doseq [s [#{sentinel} (index #{sentinel} identity :idx/unique)]]
       (is (= #{:replacement} (replace-by s identity sentinel :replacement))))))
 
 #?(:clj
@@ -337,8 +339,10 @@
     (is (some? (p/-get-eq v :foo)))
     (let [v2 (delete-index v :foo :idx/hash)]
       (is (nil? (p/-get-eq v2 :foo)))
-      ;; queries still work via scanning
-      (is (= [{:foo 1}] (vec (lookup v2 :foo 1))))))
+      ;; deleting the index a query needs is a mistake worth hearing about,
+      ;; not a silent return to scanning
+      (is (thrown? #?(:clj clojure.lang.ExceptionInfo :cljs js/Error)
+                   (vec (lookup v2 :foo 1))))))
   ;; deleting a match index uses the same normalization as creating one
   (let [v (index [{:foo 1 :bar 2}] (match :foo :idx/value :bar :idx/value) :idx/hash)
         v2 (delete-index v (match :foo :idx/value :bar :idx/value) :idx/hash)]
@@ -555,7 +559,7 @@
   ;; underlying property (its own expected value is ignored; the supplied v is
   ;; used) — same normalisation index applies, so the same form hits the index
   (let [coll [{:a 1} {:a nil}]
-        c (index coll (pred :a) :idx/hash (pred :a) :idx/unique)]
+        c (index coll (pred :a) :idx/hash (pred :a) :idx/unique (pred :a) :idx/sort)]
     (is (= [{:a 1}] (vec (lookup c (pred :a) true))))
     (is (= [{:a nil}] (vec (lookup c (pred :a) false))))
     (is (= [{:a 1}] (vec (lookup coll (pred :a) true)))) ; unindexed scan agrees
@@ -908,6 +912,109 @@
 (deftest vec-generative-test (check-props vec-props))
 (deftest map-generative-test (check-props map-props))
 (deftest set-generative-test (check-props set-props))
+
+;; ---------------------------------------------------------------------------
+;; tuple
+;; ---------------------------------------------------------------------------
+
+(def ^:private tuple-rows
+  [{:a 1 :b 20} {:a 1 :b 3} {:a 2 :b 1} {:a 1}])
+
+(deftest tuple-is-a-value-so-a-fresh-one-finds-the-same-index
+  ;; This is the whole point of tuple over (juxt :a :b): index identity is
+  ;; function identity, so a rebuilt function property silently loses its index,
+  ;; while a rebuilt tuple is the same value and finds it.
+  (is (= (tuple :a :b) (tuple :a :b)))
+  (is (= (hash (tuple :a :b)) (hash (tuple :a :b))))
+  (is (not= (tuple :a :b) (tuple :b :a)))
+  (is (not= (juxt :a :b) (juxt :a :b)) "the hazard tuple exists to remove")
+  (let [c (index tuple-rows (tuple :a :b) :idx/sort)]
+    (is (some? (p/-get-sort c (tuple :a :b)))
+        "an index created with one tuple is found by another")
+    (is (= [{:a 1 :b 3}] (vec (lookup c (tuple :a :b) [1 3]))))))
+
+(deftest tuple-extracts-a-comparable-vector
+  (is (= [1 20] (p/-property (tuple :a :b) {:a 1 :b 20})))
+  (is (= [1 nil] (p/-property (tuple :a :b) {:a 1})) "an absent component reads as nil")
+  (let [c (index tuple-rows (tuple :a :b) :idx/sort)]
+    ;; nil sorts first within its group, which is what lets an absent optional
+    ;; key participate in the order at all.
+    (is (= [{:a 1} {:a 1 :b 3} {:a 1 :b 20} {:a 2 :b 1}]
+           (vec (ascending c (tuple :a :b)))))
+    (is (= [{:a 1 :b 20} {:a 2 :b 1}]
+           (vec (ascending c (tuple :a :b) >= [1 20]))))))
+
+(deftest tuple-composes-with-other-properties
+  (let [rows [{:u {:id 2}} {:u {:id 1}}]
+        c (index rows (tuple (path :u :id)) :idx/sort)]
+    (is (= [{:u {:id 1}} {:u {:id 2}}] (vec (ascending c (tuple (path :u :id))))))))
+
+;; ---------------------------------------------------------------------------
+;; A manually indexed collection refuses what it cannot answer quickly
+;; ---------------------------------------------------------------------------
+
+(defn- refuses? [f]
+  (try (doall (f)) false
+       (catch #?(:clj clojure.lang.ExceptionInfo :cljs :default) e
+         (= "No index on this collection can answer for this property. Add one with `index`, or use `auto`."
+            #?(:clj (ex-message e) :cljs (ex-message e))))))
+
+(deftest a-manual-collection-refuses-an-unindexed-query
+  (let [rows [{:a 1 :b 2} {:a 2 :b 3}]
+        c (index rows :a :idx/sort)]
+    (is (not (refuses? #(ascending c :a >= 1))) "the property it declared")
+    (is (refuses? #(ascending c :b >= 1)))
+    (is (refuses? #(descending c :b <= 1)))
+    (is (refuses? #(lookup c :b 2)))
+    (is (refuses? #(lookup-keys c :b 2)))
+    (is (refuses? #(identify c :b 2)))
+    (is (refuses? #(pk c :b 2)))
+    (is (refuses? #(replace-by c :b 2 {:a 9 :b 2})))))
+
+(deftest a-plain-or-auto-collection-is-never-refused
+  (let [rows [{:a 1 :b 2} {:a 2 :b 3}]]
+    ;; A plain collection never claimed an index, so scanning is its contract.
+    (is (not (refuses? #(lookup rows :b 2))))
+    (is (not (refuses? #(ascending rows :b >= 1))))
+    (is (not (refuses? #(identify rows :b 2))))
+    ;; An auto collection realises the index instead of refusing.
+    (let [a (auto rows)]
+      (is (not (refuses? #(lookup a :b 2))))
+      (is (not (refuses? #(ascending a :b >= 1))))
+      (is (some? (p/-get-sort a :b)) "and keeps it"))))
+
+;; ---------------------------------------------------------------------------
+;; A sort index answers an equality query
+;; ---------------------------------------------------------------------------
+
+(deftest a-sorted-index-serves-lookup
+  (let [rows [{:a 1 :n :x} {:a 2 :n :y} {:a 1 :n :z}]
+        c (index rows :a :idx/sort)]
+    (is (nil? (p/-get-eq c :a)) "no hash index was declared")
+    (is (= #{{:a 1 :n :x} {:a 1 :n :z}} (set (lookup c :a 1))))
+    (is (= #{0 2} (set (lookup-keys c :a 1))))
+    (is (= [] (vec (lookup c :a 99))) "a miss is empty, not a refusal")
+    (is (= () (lookup-keys c :a 99)))
+    (is (= (set (lookup (auto rows) :a 1)) (set (lookup c :a 1)))
+        "and agrees with the hash-indexed answer")))
+
+;; ---------------------------------------------------------------------------
+;; Whole-index ordered scans
+;; ---------------------------------------------------------------------------
+
+(deftest ascending-and-descending-scan-the-whole-index
+  (let [rows [{:a 3} {:a 1} {:a 2}]
+        c (index rows :a :idx/sort)]
+    (is (= [{:a 1} {:a 2} {:a 3}] (vec (ascending c :a))))
+    (is (= [{:a 3} {:a 2} {:a 1}] (vec (descending c :a))))
+    (is (= (vec (ascending c :a)) (reverse (descending c :a))))
+    ;; The 2-ary is what a caller previously had to spell as two half-ranges to
+    ;; avoid inventing an infinite sentinel value.
+    (is (= (vec (ascending c :a))
+           (vec (concat (ascending c :a < 0) (ascending c :a >= 0)))))
+    (is (= [] (vec (ascending (index [] :a :idx/sort) :a))))
+    (is (= [{:a 1} {:a 2} {:a 3}] (vec (ascending (auto rows) :a)))
+        "an auto collection realises the index for a full scan too")))
 
 (comment
   (clojure.test/run-tests)
